@@ -9,7 +9,7 @@ from ml_base.utils.logger import get_logger
 from ml_base.utils.misc import parallel_exec, download_file, get_temp_folder
 
 from ml_vision.utils.inat import read_csv_in_burst, get_corrupted_images
-from ml_vision.datasets.image import ImageDataset
+from ml_vision.datasets import ImageDataset
 
 logger = get_logger(__name__)
 
@@ -270,14 +270,14 @@ class INatMetadata():
 
 class INatDataset(ImageDataset):
 
-    class METADATA_FIELDS(ImageDataset.METADATA_FIELDS):
+    class MetadataFields(ImageDataset.MetadataFields):
         POS_ACCURACY = INatMetadata.Observation.POS_ACCURACY
         LATITUDE = INatMetadata.Observation.LATITUDE
         LONGITUDE = INatMetadata.Observation.LONGITUDE
         USER_ID = INatMetadata.Photo.USER_ID
         LICENSE = INatMetadata.Photo.LICENSE
 
-    class ANNOTATIONS_FIELDS(ImageDataset.ANNOTATIONS_FIELDS):
+    class AnnotationFields(ImageDataset.AnnotationFields):
         QUAL_GRADE = INatMetadata.Observation.QUAL_GRADE
 
         KINGDOM = INatMetadata.Taxa.Ranks.KINGDOM
@@ -295,7 +295,7 @@ class INatDataset(ImageDataset):
         _TAXA_RANKS_NAMES = [
             KINGDOM, PHYLUM, CLASS, ORDER, FAMILY, GENUS, SPECIES, SUBSPECIES, VARIETY]
 
-        TYPES = ImageDataset.ANNOTATIONS_FIELDS.TYPES
+        TYPES = ImageDataset.AnnotationFields.TYPES
 
     @classmethod
     def from_metadata(cls, metadata: INatMetadata, **kwargs) -> INatDataset:
@@ -314,67 +314,67 @@ class INatDataset(ImageDataset):
 
         data = pd.DataFrame()
 
-        data[cls.ANNOTATIONS_FIELDS.ITEM] = df.apply(
+        data[cls.AnnotationFields.ITEM] = df.apply(
             lambda rec: f"{rec[photo_id_fld]}{os.path.splitext(rec[inat_url_fld])[1]}", axis=1)
         obs_uuid_fld = INatMetadata.Observation.OBSERVATION_UUID
         photo_id_fld = INatMetadata.Photo.PHOTO_ID
-        data[cls.ANNOTATIONS_FIELDS.ID] = (
+        data[cls.AnnotationFields.ID] = (
             df.apply(lambda rec: f"{rec[obs_uuid_fld]}-{rec[photo_id_fld]}", axis=1))
-        data[cls.ANNOTATIONS_FIELDS.MEDIA_ID] = df[INatMetadata.Photo.PHOTO_ID].copy()
-        data[cls.METADATA_FIELDS.FILENAME] = data[cls.ANNOTATIONS_FIELDS.ITEM].copy()
-        data[cls.METADATA_FIELDS.SEQ_ID] = df[INatMetadata.Observation.OBSERVATION_UUID].copy()
+        data[cls.MetadataFields.MEDIA_ID] = df[INatMetadata.Photo.PHOTO_ID].copy()
+        data[cls.MetadataFields.FILENAME] = data[cls.AnnotationFields.ITEM].copy()
+        data[cls.MetadataFields.SEQ_ID] = df[INatMetadata.Observation.OBSERVATION_UUID].copy()
 
         if taxonomy_level is not None:
             assert_msg = f"Taxon rank {taxonomy_level} not present in Metadata"
             assert taxonomy_level in df.columns, assert_msg
-            data[cls.ANNOTATIONS_FIELDS.LABEL] = df[taxonomy_level]
+            data[cls.AnnotationFields.LABEL] = df[taxonomy_level]
         else:
-            data[cls.ANNOTATIONS_FIELDS.LABEL] = df[INatMetadata.Taxa.TAXON_NAME]
+            data[cls.AnnotationFields.LABEL] = df[INatMetadata.Taxa.TAXON_NAME]
         if INatMetadata.Taxa.RANK in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.TAXA_LEVEL] = df[INatMetadata.Taxa.RANK].copy()
+            data[cls.AnnotationFields.TAXA_LEVEL] = df[INatMetadata.Taxa.RANK].copy()
         if INatMetadata.Observation.OBSERVED_ON in df.columns:
-            data[cls.METADATA_FIELDS.DATE_CAPTURED] = df[INatMetadata.Observation.OBSERVED_ON].copy()
+            data[cls.MetadataFields.DATE_CAPTURED] = df[INatMetadata.Observation.OBSERVED_ON].copy()
         if INatMetadata.Observation.LATITUDE in df.columns:
-            data[cls.METADATA_FIELDS.LATITUDE] = df[INatMetadata.Observation.LATITUDE].copy()
+            data[cls.MetadataFields.LATITUDE] = df[INatMetadata.Observation.LATITUDE].copy()
         if INatMetadata.Observation.LONGITUDE in df.columns:
-            data[cls.METADATA_FIELDS.LONGITUDE] = df[INatMetadata.Observation.LONGITUDE].copy()
+            data[cls.MetadataFields.LONGITUDE] = df[INatMetadata.Observation.LONGITUDE].copy()
         if INatMetadata.Observation.QUAL_GRADE in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.QUAL_GRADE] = (
+            data[cls.AnnotationFields.QUAL_GRADE] = (
                 df[INatMetadata.Observation.QUAL_GRADE].copy())
         if INatMetadata.Photo.WIDTH in df.columns:
-            data[cls.METADATA_FIELDS.WIDTH] = df[INatMetadata.Photo.WIDTH].copy()
+            data[cls.MetadataFields.WIDTH] = df[INatMetadata.Photo.WIDTH].copy()
         if INatMetadata.Photo.HEIGHT in df.columns:
-            data[cls.METADATA_FIELDS.HEIGHT] = df[INatMetadata.Photo.HEIGHT].copy()
+            data[cls.MetadataFields.HEIGHT] = df[INatMetadata.Photo.HEIGHT].copy()
         # license
         if INatMetadata.Photo.LICENSE in df.columns:
-            data[cls.METADATA_FIELDS.LICENSE] = df[INatMetadata.Photo.LICENSE].copy()
+            data[cls.MetadataFields.LICENSE] = df[INatMetadata.Photo.LICENSE].copy()
         if INatMetadata.Observation.POS_ACCURACY in df.columns:
-            data[cls.METADATA_FIELDS.POS_ACCURACY] = df[INatMetadata.Observation.POS_ACCURACY].copy()
+            data[cls.MetadataFields.POS_ACCURACY] = df[INatMetadata.Observation.POS_ACCURACY].copy()
         if INatMetadata.Photo.USER_ID in df.columns:
-            data[cls.METADATA_FIELDS.USER_ID] = df[INatMetadata.Photo.USER_ID].copy()
+            data[cls.MetadataFields.USER_ID] = df[INatMetadata.Photo.USER_ID].copy()
         if INatMetadata.Taxa.Ranks.KINGDOM in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.KINGDOM] = (
+            data[cls.AnnotationFields.KINGDOM] = (
                 df[INatMetadata.Taxa.Ranks.KINGDOM].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.CLASS in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.CLASS] = (
+            data[cls.AnnotationFields.CLASS] = (
                 df[INatMetadata.Taxa.Ranks.CLASS].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.ORDER in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.ORDER] = (
+            data[cls.AnnotationFields.ORDER] = (
                 df[INatMetadata.Taxa.Ranks.ORDER].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.FAMILY in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.FAMILY] = (
+            data[cls.AnnotationFields.FAMILY] = (
                 df[INatMetadata.Taxa.Ranks.FAMILY].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.GENUS in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.GENUS] = (
+            data[cls.AnnotationFields.GENUS] = (
                 df[INatMetadata.Taxa.Ranks.GENUS].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.SPECIES in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.SPECIES] = (
+            data[cls.AnnotationFields.SPECIES] = (
                 df[INatMetadata.Taxa.Ranks.SPECIES].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.SUBSPECIES in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.SUBSPECIES] = (
+            data[cls.AnnotationFields.SUBSPECIES] = (
                 df[INatMetadata.Taxa.Ranks.SUBSPECIES].apply(lambda x: get_cleaned_label(x)))
         if INatMetadata.Taxa.Ranks.VARIETY in df.columns:
-            data[cls.ANNOTATIONS_FIELDS.VARIETY] = (
+            data[cls.AnnotationFields.VARIETY] = (
                 df[INatMetadata.Taxa.Ranks.VARIETY].apply(lambda x: get_cleaned_label(x)))
 
         instance = cls.from_dataframe(data, **kwargs)
@@ -423,7 +423,7 @@ class INatDataset(ImageDataset):
         return cls.from_metadata(inat_metadata, taxonomy_level=taxonomy_level, **kwargs)
 
     def mapping_to_taxonomy_level(self, taxonomy_level_to):
-        assert_cond = taxonomy_level_to in self.ANNOTATIONS_FIELDS._TAXA_RANKS_NAMES
+        assert_cond = taxonomy_level_to in self.AnnotationFields._TAXA_RANKS_NAMES
         assert assert_cond, "Invalid taxonomy_level_to"
 
         self.filter_by_column(taxonomy_level_to, '', mode='exclude', inplace=True)
@@ -437,7 +437,7 @@ class INatDataset(ImageDataset):
         instance = super().from_csv(source_path=source_path, **kwargs)
 
         if taxonomy_level is not None:
-            assert_cond = taxonomy_level in cls.ANNOTATIONS_FIELDS._TAXA_RANKS_NAMES
+            assert_cond = taxonomy_level in cls.AnnotationFields._TAXA_RANKS_NAMES
             assert assert_cond, "Invalid taxonomy_level"
             instance.mapping_to_taxonomy_level(taxonomy_level)
 
@@ -461,7 +461,7 @@ class INatDataset(ImageDataset):
     @classmethod
     def _download(cls,
                   dest_path,
-                  media_data,
+                  metadata: pd.DataFrame,
                   **kwargs):
         images_size = kwargs.get('images_size', 'original')
 
@@ -472,12 +472,12 @@ class INatDataset(ImageDataset):
 
         def get_inat_url(record):
             return INatMetadata.inat_url_str.format(
-                photo_id=record[cls.METADATA_FIELDS.ID],
+                photo_id=record[cls.MetadataFields.MEDIA_ID],
                 images_size=images_size,
-                ext=os.path.splitext(record[cls.METADATA_FIELDS.FILENAME])[1].replace('.', ''))
+                ext=os.path.splitext(record[cls.MetadataFields.FILENAME])[1].replace('.', ''))
 
-        media_dict = media_data[[cls.METADATA_FIELDS.ID,
-                                 cls.METADATA_FIELDS.FILENAME]].to_dict('records')
+        media_dict = metadata[[cls.MetadataFields.MEDIA_ID,
+                               cls.MetadataFields.FILENAME]].to_dict('records')
         logger.info(f"Downloading {len(media_dict)} images...")
 
         parallel_exec(
@@ -502,11 +502,11 @@ class INatDataset(ImageDataset):
         if len(bad_items_list) > 0:
             logger.info(f'Removing {len(bad_items_list)} corrupted images')
             self.filter_by_column(
-                self.ANNOTATIONS_FIELDS.ITEM, list(bad_items_list), mode='exclude', inplace=True)
+                self.AnnotationFields.ITEM, list(bad_items_list), mode='exclude', inplace=True)
 
     @classmethod
     def get_filename(cls, record):
-        return record[cls.METADATA_FIELDS.FILENAME]
+        return record[cls.MetadataFields.FILENAME]
 
 
 class INatTaxonomyMapper():

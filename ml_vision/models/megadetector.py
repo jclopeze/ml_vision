@@ -8,7 +8,7 @@ import os
 import pandas as pd
 from shutil import move
 import subprocess
-from typing import Union, Final, Literal, List
+from typing import Union, Final, Literal, List, Tuple
 
 from ml_base.model import Model
 from ml_base.eval import Evaluator, Metric
@@ -19,11 +19,10 @@ from ml_base.utils.logger import get_logger
 from ml_base.utils.dataset import STD_DATEFORMAT
 from ml_base.utils.dataset import get_random_id
 
-from ml_vision.datasets.image import ImageDataset
-from ml_vision.datasets.video import VideoDataset
-from ml_vision.datasets.vision import VisionDataset
+from ml_vision.datasets import ImageDataset
+from ml_vision.datasets import VideoDataset
+from ml_vision.datasets import VisionDataset
 from ml_vision.utils.image import get_list_of_detections
-from ml_vision.utils.image import ImageFields
 from ml_vision.utils.coords import CoordinatesType
 from ml_vision.utils.vision import VisionFields as VFields
 
@@ -46,6 +45,7 @@ class MegadetectorV5(Model):
         self.version = version
         self.model_path = model_path
 
+    # TODO: Change returned type
     @classmethod
     def load_model(cls,
                    source_path: str = None,
@@ -56,7 +56,11 @@ class MegadetectorV5(Model):
             if source_path is None:
                 source_path = model_path
             else:
+                os.makedirs(os.path.dirname(source_path), exist_ok=True)
                 move(model_path, source_path)
+                model_path = source_path
+        else:
+            model_path = source_path
 
         instance = cls(version, model_path)
         return instance
@@ -135,9 +139,9 @@ class MegadetectorV5(Model):
     def classify(self,
                  dataset: ImageDataset,
                  dets_threshold: float,
-                 return_detections: bool = False) -> ImageDataset:
+                 return_detections: bool = False) -> Union[ImageDataset, Tuple[ImageDataset, ImageDataset]]:
 
-        dets_ds = self.predict(dataset=dataset, threshold=dets_threshold)
+        dets_ds = self.predict(dataset=dataset)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
@@ -178,22 +182,22 @@ class MegadetectorV5(Model):
                                          item: str,
                                          threshold: float,
                                          item_to_label_score: dict):
-        dets_item_thres = dets_df[(dets_df[ImageFields.ITEM] == item) &
-                                  (dets_df[ImageFields.SCORE] >= threshold)]
+        dets_item_thres = dets_df[(dets_df[VFields.ITEM] == item) &
+                                  (dets_df[VFields.SCORE] >= threshold)]
 
         if len(dets_item_thres) > 0:
-            person_dets = dets_item_thres[dets_item_thres[ImageFields.LABEL] == cls.PERSON]
+            person_dets = dets_item_thres[dets_item_thres[VFields.LABEL] == cls.PERSON]
             if len(person_dets) > 0:
                 label = cls.PERSON
-                score = person_dets[ImageFields.SCORE].max()
+                score = person_dets[VFields.SCORE].max()
             else:
                 label = cls.ANIMAL
-                score = dets_item_thres[ImageFields.SCORE].max()
+                score = dets_item_thres[VFields.SCORE].max()
         else:
             label = cls.EMPTY
-            dets_item_all = dets_df[dets_df[ImageFields.ITEM] == item]
+            dets_item_all = dets_df[dets_df[VFields.ITEM] == item]
             if len(dets_item_all) > 0:
-                score = 1 - dets_item_all[ImageFields.SCORE].max()
+                score = 1 - dets_item_all[VFields.SCORE].max()
             else:
                 score = 1.
         item_to_label_score[item] = {
@@ -220,8 +224,8 @@ class MegadetectorV5(Model):
 
         # TODO: Check if it is needed to convert dataset to a media level dataset
         classif_ds = dataset.copy()
-        classif_ds[ImageFields.LABEL] = lambda x: item_to_label_score[x[ImageFields.ITEM]]['label']
-        classif_ds[ImageFields.SCORE] = lambda x: item_to_label_score[x[ImageFields.ITEM]]['score']
+        classif_ds[VFields.LABEL] = lambda x: item_to_label_score[x[VFields.ITEM]]['label']
+        classif_ds[VFields.SCORE] = lambda x: item_to_label_score[x[VFields.ITEM]]['score']
 
         return classif_ds
 
@@ -234,7 +238,7 @@ class MegadetectorV5Video(MegadetectorV5):
                 freq_video_sampling: int = 5,
                 frames_folder: str = None,
                 ) -> VideoDataset:
-        frames_ds = dataset.create_frames_dataset(frames_folder, freq_video_sampling)
+        frames_ds = VideoDataset.create_frames_dataset(dataset, frames_folder, freq_video_sampling)
 
         dets_frames_ds = super().predict(dataset=frames_ds, threshold=threshold)
 
@@ -248,9 +252,11 @@ class MegadetectorV5Video(MegadetectorV5):
                  dets_threshold: float,
                  freq_video_sampling: int = 5,
                  frames_folder: str = None,
-                 return_detections: bool = False) -> VideoDataset:
+                 return_detections: bool = False) -> Union[VideoDataset, Tuple[VideoDataset, VideoDataset]]:
 
-        dets_ds = self.predict(dataset, dets_threshold, freq_video_sampling, frames_folder)
+        dets_ds = self.predict(dataset,
+                               freq_video_sampling=freq_video_sampling,
+                               frames_folder=frames_folder)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
@@ -276,10 +282,10 @@ class ImageDatasetMD(ImageDataset):
             id = get_random_id()
 
             records[id] = {
-                ImageFields.ITEM: item,
-                ImageFields.LABEL: label,
-                ImageFields.BBOX: bbox,
-                ImageFields.SCORE: score
+                VFields.ITEM: item,
+                VFields.LABEL: label,
+                VFields.BBOX: bbox,
+                VFields.SCORE: score
             }
 
     @classmethod
@@ -361,7 +367,7 @@ class ImageDatasetMD(ImageDataset):
             records=records)
 
         annotations = pd.DataFrame(data=records.values(),
-                                   index=records.keys()).reset_index(names=ImageFields.ID)
+                                   index=records.keys()).reset_index(names=VFields.ID)
         prediction_dataset = cls(annotations,
                                  metadata,
                                  root_dir,
@@ -378,7 +384,7 @@ class ImageDatasetMD(ImageDataset):
                 add_detection_id: bool = False,
                 images_dims: dict = None) -> dict:
         """Creates a JSON representation of the detections contained in the dataset.
-        The dataset must have the column 'image_id'.
+        The dataset must have the column 'file_id'.
         Detections are provided in the following format:
         ```
         {
@@ -416,7 +422,7 @@ class ImageDatasetMD(ImageDataset):
             Whether or not the 'id' of each element will be formed with the path of each item,
             removing the base directory where the images were stored (generally, the `image_dir` or
             the `dest_path` parameters of some dataset constructors).
-            If False, the 'id' will be the 'image_id' field of each item.
+            If False, the 'id' will be the 'file_id' field of each item.
             By default False
         add_detection_id : bool, optional
             Whether to include the `id` in the `detections` field or not, by default False
@@ -428,11 +434,11 @@ class ImageDatasetMD(ImageDataset):
         dict
             Dictionary with the resulting information
         """
-        df = self[[self.ANNOTATIONS_FIELDS.ITEM,
-                   self.ANNOTATIONS_FIELDS.LABEL,
-                   self.ANNOTATIONS_FIELDS.BBOX,
-                   self.METADATA_FIELDS.MEDIA_ID,
-                   self.ANNOTATIONS_FIELDS.SCORE]]
+        df = self[[self.AnnotationFields.ITEM,
+                   self.AnnotationFields.LABEL,
+                   self.AnnotationFields.BBOX,
+                   self.MetadataFields.MEDIA_ID,
+                   self.AnnotationFields.SCORE]]
         coords_type = self._get_coordinates_type()
         if images_dims is None and out_coordinates_type != coords_type:
             images_dims = self.get_media_dims().set_index(VFields.ITEM)

@@ -8,8 +8,8 @@ import pandas as pd
 
 from ml_base.utils.logger import get_logger
 from ml_base.utils.misc import parallel_exec
-from ml_vision.datasets.image import ImageDataset
-from ml_vision.datasets.video import VideoDataset
+from ml_vision.datasets import ImageDataset
+from ml_vision.datasets import VideoDataset
 
 logger = get_logger(__name__)
 

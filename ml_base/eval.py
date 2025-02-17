@@ -5,7 +5,7 @@ from typing import Union, List
 
 from ml_base.dataset import Dataset
 from ml_base.metric import Metric, MetricType
-from utils.logger import get_logger
+from ml_base.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

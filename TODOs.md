@@ -21,12 +21,22 @@
     - ~~check if there are fields to remove from `obj_level_ds` (e.g., `image_id`)~~
 - ~~Error in `to_csv`~~.
 - ~~Refactor `Megadetector` class~~
+- ~~Allow creating instances of `VisionDataset`.~~
+    - ~~Create the properties `images_ds` and `videos_ds` in `VisionDataset`, to retrieve only images or videos data.~~
+- ~~Check empty datasets cases~~
+    - ~~Add verification of `len(ds) == 0` when filtering~~
+- ~~Check if it is possible to rename the field ~video_id~ to `parent_video_id` for image datasets (e.g., in method `create_object_level_dataset_using_detections`)~~
+- ~~Fix the call from method `create_crops_dataset_using_detections`~~
 
 ## TODO
-- Overload `+` operator:
-    `def __add__(self, other): return type(self).from_datasets(self, other)`
-- **Check empty datasets cases**
-    - Add verification of `len(ds) == 0` when filtering
+- **The method `from_datasets` fails when the datasets are from different types**
+- In `from_folder`, allow to configure the way in which the labels are taken; e.g., last folder, first folder, join folder, etc.
+- **In the static constructors of `Dataset`, filter the registers found by `FILES_EXTS`, in case any, otherwise allow to build datasets of different types (i.e., images and videos)**.
+- **Overload `+` operator**:
+    - ~~`def __add__(self, other): return type(self).from_datasets(self, other)`~~
+    - **Allow addition of datasets with different file types (e.g., images dataset + videos dataset)**
+- **Improve the use of `MegadetectorV5` and `MegadetectorV5Video` by the implementation of vision datasets**
+- Add the parameter `use_bboxes` to the method `create_crops_dataset`
 - *Update method `_get_dataframe_from_json` to adapt to changes in `media_id` field*
 - Allow to have metadata entries with no annotations
 - *Reduce the number of kwargs*
@@ -34,8 +44,6 @@
 - When passing a `root_dir` relative to the current dir, validate how to store the items in CSVs
 - Unify all the concepts (e.g., ~~columns, fields~~; categories, classes; etc.)
 - Control when the logging messages should be silent
-- Check if it is possible to rename the field ~video_id~ to `parent_video_id` for image datasets (e.g., in method `create_object_level_dataset_using_detections`)
-- Fix the call from method `create_crops_dataset_using_detections`
 - Use `__all__` to define elements to import when `import *`
 - Remove column 'partition' of a dataset after applying `filter_by_partition`
 - Research [supervision](https://github.com/roboflow/supervision)
@@ -45,3 +53,17 @@
 
 # Evaluation
 - Create the interfaces for evaluators and metrics
+
+
+# Other
+Other requirements:
+```
+matplotlib
+seaborn
+requests
+Pillow==9.5.0
+opencv-python
+opencv-contrib-python
+tqdm
+jupyterlab
+```

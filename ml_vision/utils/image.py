@@ -5,15 +5,16 @@ import math
 from multiprocessing import Manager
 import pandas as pd
 from typing import Iterable, Tuple, List, Union
+import numpy as np
 
 from PIL import Image
 from PIL import ImageFile
 import cv2
 
-from .vision import VisionFields
 from ml_base.utils.logger import get_logger
 from ml_base.utils.misc import parallel_exec
 
+from ml_vision.utils.vision import VisionFields
 from ml_vision.utils.coords import CoordinatesType, CoordinatesFormat, CoordinatesDataType
 from ml_vision.utils.coords import transform_coordinates
 
@@ -64,11 +65,11 @@ def set_image_dims(image: str, images_dict: dict):
     }
 
 
-def draw_detections_of_image(item:str,
-                             detections:pd.DataFrame,
-                             blur_people:bool=False,
-                             thickness:int=None,
-                             color:str=RED):
+def draw_detections_of_image(item: str,
+                             detections: pd.DataFrame,
+                             blur_people: bool = False,
+                             thickness: int = None,
+                             color: str = RED):
     """Draws bounding boxes of the detections in the image `item`.
     Optionally applies a Gaussian filter to blur the region of person
     detections and preserve anonymity; in such cases, neither the bounding boxes nor the labels
@@ -94,16 +95,16 @@ def draw_detections_of_image(item:str,
         Whether or not to blur the detections of persons in order to preserve anonymity,
         by default False
     """
-    dets_item = detections[detections[ImageFields.ITEM] == item]
+    dets_item = detections[detections[VisionFields.ITEM] == item]
 
     if len(dets_item) == 0:
         return
 
     bboxes, labels, scores, colors = [], [], [], []
     for record in dets_item.to_dict('records'):
-        bboxes.append([int(x) for x in record[ImageFields.BBOX].split(',')])
-        labels.append(record.get(ImageFields.LABEL))
-        scores.append(record.get(ImageFields.SCORE))
+        bboxes.append([int(x) for x in record[VisionFields.BBOX].split(',')])
+        labels.append(record.get(VisionFields.LABEL))
+        scores.append(record.get(VisionFields.SCORE))
         if 'color' in record:
             colors.append(record['color'])
     if len(colors) == 0:
@@ -247,9 +248,12 @@ def crop_bboxes_on_image(source_path: str,
                          bboxes: list[Iterable[int]],
                          bboxes_coords_inside_crops: dict,
                          crops_dims: dict,
-                         bottom_offset: int = 0,
+                         bottom_offset: Union[int, float] = 0,
                          force_creation: bool = True):
     assert len(dest_paths) == len(bboxes)
+    assert isinstance(bottom_offset, int) or (
+        isinstance(bottom_offset, float) and bottom_offset < 1)
+
     LEFT = 0
     UPPER = 1
     RIGHT = 2
@@ -258,6 +262,10 @@ def crop_bboxes_on_image(source_path: str,
         img_orig = Image.open(source_path).convert('RGB')
         im_width, im_height = img_orig.size
 
+        y2_max = im_height-1
+        if isinstance(bottom_offset, int) and bottom_offset < y2_max:
+            y2_max -= bottom_offset
+
         for dest_path, bbox in zip(dest_paths, bboxes):
             bbox_width = bbox[RIGHT] - bbox[LEFT]
             bbox_height = bbox[LOWER] - bbox[UPPER]
@@ -265,17 +273,23 @@ def crop_bboxes_on_image(source_path: str,
             extra = int(abs(bbox_width - bbox_height) / 2)
             if bbox_width >= bbox_height:
                 x1, x2 = bbox[LEFT], bbox[RIGHT]
-                y1, y2 = bbox[UPPER] - extra, bbox[LOWER] + extra
+                y1 = bbox[UPPER] - extra
+                if isinstance(bottom_offset, float) and bbox[LOWER] >= bottom_offset * im_height:
+                    y2 = bbox[LOWER]
+                    y1 -= extra
+                else:
+                    y2 = bbox[LOWER] + extra
+
                 if (bbox_width - bbox_height) % 2 != 0:
                     y1 -= 1
                 if y1 < 0:
                     y2 += abs(y1)
                     y2 = min(y2, im_height-1)
                     y1 = 0
-                if y2 > im_height-1-bottom_offset:
-                    y1 -= (y2 - (im_height-1-bottom_offset))
+                if y2 > y2_max:
+                    y1 -= (y2 - y2_max)
                     y1 = max(y1, 0)
-                    y2 = im_height-1-bottom_offset
+                    y2 = y2_max
             else:
                 x1, x2 = bbox[LEFT] - extra, bbox[RIGHT] + extra
                 y1, y2 = bbox[UPPER], bbox[LOWER]
@@ -346,7 +360,7 @@ def get_list_of_detections(data: pd.DataFrame,
     ----------
     data : pd.DataFrame
         DataFrame with the data of the predictions dataset. The DataFrame must have the column
-        'image_id'.
+        'file_id'.
     inv_labelmap : dict
         Dictionary with class names to ids, in the form {'class_name': 'id'}
     out_coords_type : CoordinatesType, optional
@@ -356,7 +370,7 @@ def get_list_of_detections(data: pd.DataFrame,
         Threshold for which detections will be considered or ignored, by default 0.3
     form_id_with_filename_without_prefix : str, optional
             Prefix that must be removed from the items to form the id of each element.
-            If None, id will be the 'image_id' field of each item.
+            If None, id will be the 'file_id' field of each item.
             By default None
     images_dims : pd.DataFrame, optional
         Dataframe containing 'width' and 'height' of each image, having the item as the index,
@@ -372,7 +386,7 @@ def get_list_of_detections(data: pd.DataFrame,
     results = Manager().list()
     parallel_exec(
         func=append_detection_to_list,
-        elements=data[ImageFields.ITEM].unique(),
+        elements=data[VisionFields.ITEM].unique(),
         item=lambda item: item,
         data=data,
         results=results,
@@ -413,23 +427,23 @@ def append_detection_to_list(item,
         Threshold for which detections will be considered or ignored, by default 0.3
     form_id_with_filename_without_prefix : str
         Prefix that must be removed from the items to form the id of each element.
-        If None, id will be the 'image_id' field of each item.
+        If None, id will be the 'file_id' field of each item.
         By default None
     images_dims : pd.DataFrame
         Dataframe containing 'width' and 'height' of each image, having the item as the index
     add_detection_id : bool, optional
         Whether to include the `id` in the `detections` field or not, by default False
     """
-    rows_item = data.loc[(data[ImageFields.ITEM] == item) & (
-        data[ImageFields.SCORE] >= score_threshold)]
+    rows_item = data.loc[(data[VisionFields.ITEM] == item) & (
+        data[VisionFields.SCORE] >= score_threshold)]
     if len(rows_item) == 0:
         return
     detections = []
     for _, record in rows_item.iterrows():
-        img_width = images_dims.loc[item][ImageFields.WIDTH] if images_dims is not None else None
-        img_height = images_dims.loc[item][ImageFields.HEIGHT] if images_dims is not None else None
+        img_width = images_dims.loc[item][VisionFields.WIDTH] if images_dims is not None else None
+        img_height = images_dims.loc[item][VisionFields.HEIGHT] if images_dims is not None else None
         bbox = transform_coordinates(
-            record[ImageFields.BBOX],
+            record[VisionFields.BBOX],
             input_format=CoordinatesFormat.x_y_width_height,
             output_format=CoordinatesFormat.x_y_width_height,
             output_coords_type=out_coords_type,
@@ -437,29 +451,44 @@ def append_detection_to_list(item,
             media_width=img_width,
             media_height=img_height)
         det = {
-            'category': str(inv_labelmap[record[ImageFields.LABEL]]),
+            'category': str(inv_labelmap[record[VisionFields.LABEL]]),
             'bbox': bbox,
-            'conf': record[ImageFields.SCORE]
+            'conf': record[VisionFields.SCORE]
         }
         if add_detection_id:
-            det['id'] = record[ImageFields.ID]
+            det['id'] = record[VisionFields.ID]
         detections.append(det)
     id = (
-        os.path.relpath(rows_item.iloc[0][ImageFields.ITEM], form_id_with_filename_without_prefix)
+        os.path.relpath(rows_item.iloc[0][VisionFields.ITEM], form_id_with_filename_without_prefix)
         if form_id_with_filename_without_prefix is not None
-        else rows_item.iloc[0][ImageFields.MEDIA_ID]
+        else rows_item.iloc[0][VisionFields.MEDIA_ID]
     )
     results.append({
         'detections': detections,
         'id': str(id),
-        'max_detection_conf': rows_item.iloc[0][ImageFields.SCORE],
+        'max_detection_conf': rows_item.iloc[0][VisionFields.SCORE],
         'file': os.path.basename(item)
     })
 
 
-class ImageFields(VisionFields):
-    PARENT_VID_FRAME_NUM = "video_frame_num"
-    PARENT_VID_NUM_FRAMES = "video_num_frames"
-    PARENT_VID_ID = "video_id"
-    PARENT_IMG_ID = "parent_image_id"
-    MEDIA_ID = "image_id"
+def get_bbox_from_json_record(record: dict, include_bboxes_with_label_empty: bool) -> Union[str, object]:
+    """Get the bbox field of a record that comes from a JSON file of type COCO
+
+    Parameters
+    ----------
+    record : dict
+        Register of a JSON file of type COCO
+    include_bboxes_with_label_empty : bool
+        Whether to allow annotations with label 'empty' or not.
+
+    Returns
+    -------
+    str or np.NaN
+        String containing the values of the coordinates of the bbox field,
+        in the same format as in `record`.
+    """
+    if ((VisionFields.BBOX in record and record[VisionFields.BBOX] is not np.NaN
+         and record[VisionFields.LABEL]) and (record[VisionFields.LABEL] != 'empty'
+                                              or include_bboxes_with_label_empty)):
+        return ','.join([str(x) for x in record[VisionFields.BBOX]])
+    return np.NaN

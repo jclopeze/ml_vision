@@ -1,6 +1,5 @@
 from __future__ import annotations
 import os
-from multiprocessing import Manager
 import pandas as pd
 from shutil import move
 
@@ -9,8 +8,8 @@ from ml_base.utils.misc import parallel_exec
 from ml_base.utils.misc import download_file
 from ml_base.utils.logger import get_logger
 
-from ml_vision.datasets.image import ImageDataset
-from ml_vision.utils.lila import read_lila_metadata, download_with_azcopy
+from ml_vision.datasets import ImageDataset
+from ml_vision.utils.lila import read_lila_metadata
 from ml_vision.utils.vision import VisionFields
 
 logger = get_logger(__name__)
@@ -23,11 +22,11 @@ class LILADataset(ImageDataset):
         'azcopy-download-linux': 'https://aka.ms/downloadazcopy-v10-linux'
     }
 
-    class METADATA_FIELDS(ImageDataset.METADATA_FIELDS):
+    class MetadataFields(ImageDataset.MetadataFields):
         COLLECTION = 'collection'
         LICENSE = 'license'
 
-    class ANNOTATIONS_FIELDS(ImageDataset.ANNOTATIONS_FIELDS):
+    class AnnotationFields(ImageDataset.AnnotationFields):
         KINGDOM = 'kingdom'
         PHYLUM = 'phylum'
         CLASS = 'class'
@@ -45,7 +44,7 @@ class LILADataset(ImageDataset):
             KINGDOM, PHYLUM, CLASS, ORDER, FAMILY, GENUS, SPECIES, SUBSPECIES, VARIETY]
         _TAXA_FIELD_NAMES = _TAXA_RANKS_NAMES + [TAXA_LEVEL, SCIENTIFIC_NAME]
 
-        TYPES = ImageDataset.ANNOTATIONS_FIELDS.TYPES
+        TYPES = ImageDataset.AnnotationFields.TYPES
 
     class Collections():
         IDAHO = 'Idaho Camera Traps'
@@ -186,12 +185,7 @@ class LILADataset(ImageDataset):
                   dest_path,
                   metadata,
                   **kwargs):
-        azcopy_exec = kwargs.get('azcopy_exec')
-        batch_size = kwargs.get('azcopy_batch_size', 5000)
-        set_filename_with_id_and_ext = kwargs.get('set_filename_with_id_and_ext')
-        separate_in_dirs_per_collection = kwargs.get('separate_in_dirs_per_collection', True)
         metadata_dir = kwargs.get('metadata_dir')
-        use_azcopy_for_download = kwargs.get('use_azcopy_for_download', True)
 
         metadata_dir = metadata_dir or os.path.join(get_temp_folder(), 'metadata_dir')
         metadata_table = read_lila_metadata(metadata_dir)
@@ -200,41 +194,23 @@ class LILADataset(ImageDataset):
 
         logger.info(f"Downloading {len(metadata)} images...")
 
-        if azcopy_exec is not None:
-            # azcopy_url = os.environ.get('AZCOPY_URL', cls.DEFAULTS['azcopy-download-linux'])
-            # get_azcopy_exec(azcopy_exec, azcopy_url=azcopy_url)
-            raise Exception('')
-        files_azcopy_dir = os.path.join(dest_path, '__files_azcopy__')
-
-        collections = metadata[cls.METADATA_FIELDS.COLLECTION].unique()
+        collections = metadata[cls.MetadataFields.COLLECTION].unique()
 
         for collection in collections:
-            coll_df = metadata[metadata[cls.METADATA_FIELDS.COLLECTION] == collection]
-            filenames = coll_df[cls.METADATA_FIELDS.MEDIA_ID].values
-            aux_files_folder = os.path.join(files_azcopy_dir, collection)
-            if separate_in_dirs_per_collection:
-                output_imgs_dir = os.path.join(dest_path, collection)
-            else:
-                output_imgs_dir = dest_path
+            coll_df = metadata[metadata[cls.MetadataFields.COLLECTION] == collection]
+            filenames = coll_df[cls.MetadataFields.ITEM].values
+            output_imgs_dir = os.path.join(dest_path, collection)
             sas_url = metadata_table[collection]['sas_url']
 
-            if use_azcopy_for_download:
-                download_with_azcopy(filenames=filenames,
-                                     azcopy_exec=azcopy_exec,
-                                     batch_size=batch_size,
-                                     aux_files_folder=aux_files_folder,
-                                     output_imgs_dir=output_imgs_dir,
-                                     sas_url=sas_url)
-            else:
-                def get_dest_filename(fname):
-                    filename = cls.mapping_downloaded_imgs_azcopy[collection]({'item': fname})
-                    return os.path.join(output_imgs_dir, filename)
-                parallel_exec(
-                    func=download_file,
-                    elements=filenames,
-                    url=lambda fname: f'{sas_url}/{fname}',
-                    dest_filename=get_dest_filename,
-                    verbose=False)
+            def get_dest_filename(fname):
+                filename = cls.mapping_downloaded_imgs_azcopy[collection]({'item': fname})
+                return os.path.join(output_imgs_dir, filename)
+            parallel_exec(
+                func=download_file,
+                elements=filenames,
+                url=lambda fname: f'{sas_url}/{fname}',
+                dest_filename=get_dest_filename,
+                verbose=False)
 
     def download(self, dest_path, **kwargs):
         num_tasks = kwargs.get('num_tasks')
@@ -248,12 +224,11 @@ class LILADataset(ImageDataset):
             metadata = self.metadata
             self._download(dest_path, metadata=metadata, **kwargs)
 
-    def set_items_after_downloading(self, separated_in_dirs_per_collection=True):
+    def set_items_after_downloading(self):
         fn = self.mapping_downloaded_imgs_azcopy
-        self[self.ANNOTATIONS_FIELDS.ITEM] = lambda rw: fn[rw[self.METADATA_FIELDS.COLLECTION]](rw)
-        if separated_in_dirs_per_collection:
-            self[self.ANNOTATIONS_FIELDS.ITEM] = lambda rec: os.path.join(
-                rec[self.METADATA_FIELDS.COLLECTION], rec[self.ANNOTATIONS_FIELDS.ITEM])
+        self[self.AnnotationFields.ITEM] = lambda rec: fn[rec[self.MetadataFields.COLLECTION]](rec)
+        self[self.AnnotationFields.ITEM] = lambda rec: os.path.join(
+            rec[self.MetadataFields.COLLECTION], rec[self.AnnotationFields.ITEM])
 
     @classmethod
     def from_json(cls,
@@ -334,10 +309,10 @@ class LILADataset(ImageDataset):
                 mapping_img_id_rule = LILADataset.mapping_image_id_rules[collection]
                 instance[VisionFields.MEDIA_ID] = mapping_img_id_rule
 
-        instance[LILADataset.METADATA_FIELDS.COLLECTION] = collection
+        instance[LILADataset.MetadataFields.COLLECTION] = collection
 
         if map_to_scientific_names:
-            taxa_fields = cls.ANNOTATIONS_FIELDS._TAXA_FIELD_NAMES
+            taxa_fields = cls.AnnotationFields._TAXA_FIELD_NAMES
             _coll = collection.replace('_bbox', '') if collection.endswith('_bbox') else collection
 
             tax = pd.read_csv(mapping_classes_csv).fillna('')
@@ -355,12 +330,12 @@ class LILADataset(ImageDataset):
             instance.mapping_to_taxonomy_level(taxonomy_level)
 
         _license = LILADataset.mapping_license[collection]
-        instance[LILADataset.METADATA_FIELDS.LICENSE] = _license
+        instance[LILADataset.MetadataFields.LICENSE] = _license
 
         return instance
 
     def mapping_to_taxonomy_level(self, taxonomy_level_to):
-        assert_cond = taxonomy_level_to in self.ANNOTATIONS_FIELDS._TAXA_RANKS_NAMES
+        assert_cond = taxonomy_level_to in self.AnnotationFields._TAXA_RANKS_NAMES
         assert assert_cond, "Invalid taxonomy_level_to"
 
         self.filter_by_column(taxonomy_level_to, '', mode='exclude', inplace=True)
@@ -370,15 +345,15 @@ class LILADataset(ImageDataset):
     def from_csv(cls, source_path: str, **kwargs) -> LILADataset:
         taxonomy_level = kwargs.get('taxonomy_level', None)
         taxons = kwargs.get('taxons', None)
-        set_items_after_downloading = kwargs.get('set_items_after_downloading', True)
 
         root_dir_prov = None
-        if set_items_after_downloading and 'root_dir' in kwargs:
+        if 'root_dir' in kwargs:
             root_dir_prov = kwargs.get('root_dir')
             if 'root_dir' in kwargs:
                 del kwargs['root_dir']
 
-        instance = super().from_csv(source_path=source_path, **kwargs)
+        instance = ImageDataset.from_csv(
+            source_path=source_path, root_dir=None, validate_filenames=False, **kwargs)
 
         if taxonomy_level is not None:
             instance.mapping_to_taxonomy_level(taxonomy_level)
@@ -387,7 +362,7 @@ class LILADataset(ImageDataset):
             instance.filter_by_categories(taxons, inplace=True)
 
         if root_dir_prov is not None:
-            instance.set_items_after_downloading(separated_in_dirs_per_collection=True)
+            instance.set_items_after_downloading()
             instance._set_abspaths_and_validate_filenames(root_dir_prov, not_exist_ok=True)
 
         return instance

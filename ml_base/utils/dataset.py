@@ -90,7 +90,7 @@ def seek_files(path: str,
     return paths
 
 
-def read_labelmap_file(labelmap_path: str) ->  Optional[dict]:
+def read_labelmap_file(labelmap_path: str) -> Optional[dict]:
     """Reads the labels file and returns a mapping from ID to class name.
 
     Parameters
@@ -288,6 +288,8 @@ def get_mapping_classes_from_dict(mapping_classes_dict: dict) -> dict:
 
 
 def get_cleaned_label(value: str) -> str:
+    if value is np.nan:
+        return ""
     return " ".join(value.lower().strip().split())
 
 
@@ -299,7 +301,7 @@ class Fields():
     FILE_NAME = "file_name"
     DATE_CAPTURED = "date_captured"
     LOCATION = "location"
-    MEDIA_ID = "media_id"
+    MEDIA_ID = "file_id"
     SCORE = "score"
 
 
@@ -565,7 +567,7 @@ def get_abspath_and_validate_item(item,
 
     """
     if root_dir is not None and not item.startswith(root_dir):
-        new_item = os.path.join(root_dir, item)
+        new_item = os.path.normpath(os.path.join(root_dir, item))
     else:
         new_item = item
 
@@ -614,7 +616,12 @@ def set_field_types_in_data(data: pd.DataFrame, field_types: dict) -> pd.DataFra
     """
     for field_name, field_type in field_types.items():
         if field_name in data.columns:
-            data[field_name] = data[field_name].astype(field_type, errors='ignore')
+            if field_type in (float, int):
+                # TODO: Check if this is valid in all the cases
+                data[field_name] = pd.to_numeric(data[field_name],
+                                                 'coerce').fillna(0).astype(field_type)
+            else:
+                data[field_name] = data[field_name].astype(field_type, errors='raise')
 
     return data
 
@@ -631,6 +638,8 @@ def get_random_id() -> str:
     return str(uuid.uuid4())
 
 # TODO: Delete
+
+
 def get_sorted_df(df: pd.DataFrame,
                   sort_by: Union[str, List[str]] = None,
                   sort_asc: bool = True,

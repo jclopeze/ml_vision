@@ -66,7 +66,7 @@ def str2bool(v):
         raise Exception('Boolean value expected.')
 
 
-def get_chunk(elements, num_chunks, chunk_num, verbose=True, sort_elements=True):
+def get_chunk(elements, num_chunks, chunk_num, sort_elements=True):
     """Divide a set of `elements` into chunks so that they can be processed in different tasks.
     If `num_chunks` is None or `chunk_num` is None, the original elements will be returned.
 
@@ -78,8 +78,6 @@ def get_chunk(elements, num_chunks, chunk_num, verbose=True, sort_elements=True)
         Number of tasks between which you want to divide the elements
     chunk_num : int or None
         Current task number. Must be in range [1, `num_chunks`]
-    verbose : bool, optional
-        Whether to be verbose or not, by default True
     sort_elements : bool, optional
         Whether to sort the elements before taking the chunk or not, by default True
 
@@ -98,8 +96,6 @@ def get_chunk(elements, num_chunks, chunk_num, verbose=True, sort_elements=True)
     chunk_size = floor(len(_elements) / num_chunks)
     first = chunk_size*(chunk_num-1)
     last = len(_elements) if chunk_num == num_chunks else chunk_size*chunk_num
-    if verbose:
-        logger.debug(f"Processing elements {first+1} to {last} of {len(_elements)}")
     return _elements[first:last]
 
 def parallel_exec(func, elements, **kwargs):

@@ -42,7 +42,7 @@ pd.options.mode.chained_assignment = None
 
 class Dataset():
 
-    class METADATA_FIELDS():
+    class MetadataFields():
         ITEM: Final = Fields.ITEM
         MEDIA_ID: Final = Fields.MEDIA_ID
         FILENAME: Final = Fields.FILE_NAME
@@ -54,7 +54,7 @@ class Dataset():
             LOCATION: str
         }
 
-    class ANNOTATIONS_FIELDS():
+    class AnnotationFields():
         ITEM: Final = Fields.ITEM
         LABEL: Final = Fields.LABEL
         ID: Final = Fields.ID
@@ -66,15 +66,15 @@ class Dataset():
             SCORE: float
         }
 
-    FILES_EXTS = []
-    DEFAULT_EXT = ""
+    FILES_EXTS: Final = []
+    DEFAULT_EXT: Final = ""
     # region SPECIAL METHODS
 
     def __repr__(self):
         return repr(self.df)
 
     def __len__(self):
-        return len(self.df)
+        return len(self.annotations)
 
     def __iter__(self):
         # TODO: improve
@@ -86,6 +86,10 @@ class Dataset():
 
     def __setitem__(self, field, value):
         self.set_field_values(field, values=value, inplace=True)
+
+    # TODO: Fix
+    def __add__(self, other):
+        return type(self).from_datasets(self, other)
 
     # endregion
 
@@ -141,6 +145,10 @@ class Dataset():
         return []
 
     @property
+    def is_empty(self) -> bool:
+        return (self.annotations is None and self.metadata is None) or len(self.annotations) == 0
+
+    @property
     def _key_field_annotations(self) -> str:
         return Fields.ID
 
@@ -150,11 +158,11 @@ class Dataset():
 
     @property
     def metadata_default_fields(self) -> set:
-        return set(get_default_fields(self.METADATA_FIELDS))
+        return set(get_default_fields(self.MetadataFields))
 
     @property
     def annotations_default_fields(self) -> set:
-        return set(get_default_fields(self.ANNOTATIONS_FIELDS))
+        return set(get_default_fields(self.AnnotationFields))
 
     # endregion
 
@@ -166,7 +174,8 @@ class Dataset():
                  root_dir: str = None,
                  use_partitions: bool = True,
                  **kwargs) -> Dataset:
-        if kwargs.get('avoid_initialization', False):
+        avoid_initialization = kwargs.get('avoid_initialization', False)
+        if avoid_initialization or (annotations is None or len(annotations) == 0):
             self._set_annotations(annotations)
             self._set_metadata(metadata)
             self._set_root_dir(root_dir)
@@ -175,10 +184,6 @@ class Dataset():
         verify_integrity = kwargs.get('verify_integrity', True)
         self._fit_and_set_annotations(annotations, verify_integrity=verify_integrity)
         self._fit_and_set_metadata(metadata, verify_integrity=verify_integrity)
-
-        if len(annotations) == 0 or len(metadata) == 0:
-            # TODO: return empty dataset
-            return
 
         self._verify_annotations_and_metadata_consistency()
         self._apply_filters_and_mappings(**kwargs)
@@ -207,7 +212,7 @@ class Dataset():
         assert isinstance(dataframe, pd.DataFrame), "A pd.DataFrame must be provided for data"
         if len(dataframe) == 0:
             logger.debug(f"The dataset does not contain any elements.")
-            # TODO: return empty dataset
+            return cls(annotations=None, metadata=None)
 
         dataframe = cls._fit_dataframe(dataframe, **kwargs)
         annotations = cls._extract_annotations_from_dataframe(dataframe, **kwargs)
@@ -317,11 +322,13 @@ class Dataset():
         Dataset
             Instance of the created `Dataset`
         """
+        extensions = extensions or cls.FILES_EXTS
+        assert extensions, "You must specify extensions"
         assert os.path.isdir(source_path), f"{source_path} is not a valid folder name"
         folder_path = os.path.abspath(source_path)
         logger.info(f"Creating dataset from folder {folder_path}")
 
-        df = cls._get_dataframe_from_folder(source_path, use_labels, extensions, **kwargs)
+        df = cls._get_dataframe_from_folder(source_path, extensions, use_labels, **kwargs)
 
         kwargs['validate_filenames'] = False
         return cls.from_dataframe(df, root_dir=source_path, **kwargs)
@@ -398,6 +405,10 @@ class Dataset():
         str
             Path of folder created
         """
+        if self.is_empty:
+            logger.info(f"No data to write in folder {folder}")
+            return dest_path
+
         folder = os.path.abspath(dest_path)
         logger.info(f"Writing the dataset elements in folder {folder}")
 
@@ -460,6 +471,10 @@ class Dataset():
         str or list of str
             Path or list of paths of csv file(s) created
         """
+        if self.is_empty:
+            logger.info(f"No data to write in the CSV file {dest_path}")
+            return dest_path
+
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
 
         df = self.df
@@ -489,11 +504,10 @@ class Dataset():
         DataFrame
             DataFrame representing the Dataset.
         """
-        df = self._merge_annotations_and_metadata()
+        if self.is_empty:
+            return pd.DataFrame()
 
-        if len(df) == 0:
-            # TODO: check empty datasets
-            return df
+        df = self._merge_annotations_and_metadata()
 
         if columns is not None:
             columns = [c for c in columns if c in df.columns]
@@ -508,11 +522,7 @@ class Dataset():
 
     #   region GET_* METHODS
 
-    def get_chunk(self,
-                  num_chunks: int,
-                  chunk_num: int,
-                  partition: str = None,
-                  verbose: bool = True) -> Dataset:
+    def get_chunk(self, num_chunks: int, chunk_num: int) -> Dataset:
         """Function that divides the elements of a dataset into `num_chunks` chunks and
         returns a dataset with the elements of chunk number `chunk_num`
 
@@ -523,11 +533,6 @@ class Dataset():
         chunk_num : int
             Number of the chunk that will be taken to form the generated dataset.
             It must be in the range `[1, num_chunks]`
-        partition : str, optional
-            Partition from which the elements of the dataset will be taken, by default None
-        verbose : bool, optional
-            Whether or not to print the elements to be taken in the current process,
-            by default True
 
         Returns
         -------
@@ -535,14 +540,19 @@ class Dataset():
             Data set with the elements of chunk number `chunk_num` of the `num_chunks` chunks into
             which the original dataset was divided
         """
-        items = self._get_items(partition=partition)
-        items = get_chunk_func(items, num_chunks, chunk_num, verbose=verbose, sort_elements=True)
-        new_ds = self.filter_by_column('item', items, inplace=False)
+        if self.is_empty:
+            return self
+
+        items = get_chunk_func(self.items, num_chunks, chunk_num, sort_elements=True)
+        new_ds = self.filter_by_column(Fields.ITEM, items, inplace=False)
         return new_ds
 
     def get_annotations(self,
                         columns: Union[str, Iterable] = None,
                         remove_fields: Union[str, Iterable] = None) -> pd.DataFrame:
+        if self.is_empty:
+            return pd.DataFrame()
+
         if columns is not None and not is_array_like(columns):
             columns = [columns]
         if remove_fields is not None and not is_array_like(remove_fields):
@@ -582,6 +592,9 @@ class Dataset():
         Dataset
             Instance of the Dataset
         """
+        if self.is_empty:
+            return self
+
         instance = self if inplace else self.copy()
 
         if isinstance(values, pd.DataFrame):
@@ -628,6 +641,8 @@ class Dataset():
         Dataset
             Instance of the Dataset
         """
+        if self.is_empty:
+            return
         assert_msg = "The dataset doesn't contain the 'label' field"
         assert Fields.LABEL in self.annotations.columns, assert_msg
 
@@ -679,7 +694,8 @@ class Dataset():
         Dataset
             Instance of the Dataset
         """
-
+        if self.is_empty:
+            return self
         assert_cond = np.isclose(train_perc + test_perc + val_perc, 1.)
         assert assert_cond, 'The proportions of the partitions must add up to 1'
         logger.debug(f"Partitioning the dataset with proportions (train/test/val): "
@@ -766,7 +782,6 @@ class Dataset():
 
     #     region FILTERING METHODS
 
-    # TODO: Add verification of len(ds) == 0
     def filter_by_categories(self,
                              categories: Union[List[str], str],
                              mode: Literal['include', 'exclude'] = 'include',
@@ -819,6 +834,8 @@ class Dataset():
         Dataset
             Instance of the Dataset
         """
+        if self.is_empty:
+            return self
         assert mode in ('include', 'exclude'), f"Invalid value of mode: {mode}"
         instance = self if inplace else self.copy()
 
@@ -888,6 +905,8 @@ class Dataset():
         Dataset
             Instance of the resulting dataset
         """
+        if self.is_empty:
+            return self
         assert_cond = bool(min_label_counts) + bool(max_label_counts) + bool(label_counts) == 1
         msg = "You must configure only one of: min_label_counts, max_label_counts and label_counts"
         assert assert_cond, msg
@@ -934,6 +953,9 @@ class Dataset():
         Dataset
             Instance of the resulting dataset
         """
+        if self.is_empty:
+            return self
+
         instance = self if inplace else self.copy()
         df = instance.df
 
@@ -968,6 +990,9 @@ class Dataset():
         Dataset
             Instance of the filtered Dataset
         """
+        if self.is_empty:
+            return self
+
         instance = self if inplace else self.copy()
         df = instance.df
 
@@ -1024,6 +1049,8 @@ class Dataset():
         Dataset
             Instance of the sampled Dataset
         """
+        if self.is_empty:
+            return self
         instance = self if inplace else self.copy()
         groupby = Fields.LABEL if use_labels else None
 
@@ -1141,8 +1168,8 @@ class Dataset():
     @classmethod
     def _get_dataframe_from_folder(cls,
                                    source_path: str,
+                                   extensions: List,
                                    use_labels: bool = True,
-                                   extensions: List = None,
                                    lower_case_exts: bool = True,
                                    **_) -> pd.DataFrame:
         """_summary_
@@ -1151,10 +1178,10 @@ class Dataset():
         ----------
         source_path : str
             _description_
-        use_labels : bool, optional
-            _description_, by default True
         extensions : List, optional
             _description_, by default None
+        use_labels : bool, optional
+            _description_, by default True
         lower_case_exts : bool, optional
             _description_, by default True
 
@@ -1163,9 +1190,6 @@ class Dataset():
         pd.DataFrame
             _description_
         """
-        extensions = extensions or cls.FILES_EXTS
-        assert extensions, "You must specify extensions"
-
         extensions = list(set([x.lower() if lower_case_exts else x for x in extensions]))
         _files = seek_files(source_path, seek_extension=extensions)
 
@@ -1217,7 +1241,7 @@ class Dataset():
         metadata = pd.DataFrame()
         root_dirs = set()
         for ds in datasets:
-            if len(ds) == 0:
+            if ds.is_empty:
                 continue
             _metadata = ds.metadata
             _annotations = ds.get_annotations()
@@ -1354,36 +1378,30 @@ class Dataset():
             Whether or not to validate that the items exist.
             Set to False to speed up execution time. By default True
         """
-
         assert root_dir is not None or validate_filenames is False, "root_dir must be assigned"
-
         validate_filenames = validate_filenames and val_filenames_debug
 
         self._set_root_dir(root_dir)
 
-        if len(self) == 0:
-            # TODO: Check empty dataset
-            return
+        if root_dir is not None or validate_filenames != False:
+            items_to_abspaths = Manager().dict()
+            invalid_items = Manager().list()
+            parallel_exec(
+                func=get_abspath_and_validate_item,
+                elements=self.items,
+                item=lambda item: item,
+                root_dir=root_dir,
+                validate_filenames=validate_filenames,
+                not_exist_ok=not_exist_ok,
+                items_to_abspaths=items_to_abspaths,
+                invalid_items=invalid_items)
+            self[Fields.ITEM] = lambda record: items_to_abspaths[record[Fields.ITEM]]
 
-        items_to_abspaths = Manager().dict()
-        invalid_items = Manager().list()
-
-        parallel_exec(
-            func=get_abspath_and_validate_item,
-            elements=self.items,
-            item=lambda item: item,
-            root_dir=root_dir,
-            validate_filenames=validate_filenames,
-            not_exist_ok=not_exist_ok,
-            items_to_abspaths=items_to_abspaths,
-            invalid_items=invalid_items)
-        self[Fields.ITEM] = lambda record: items_to_abspaths[record[Fields.ITEM]]
-
-        n_invalid = len(invalid_items)
-        if n_invalid > 0:
-            logger.info(f'{n_invalid} invalid items found that were ignored')
-            self.filter_by_column(
-                Fields.ITEM, values=list(invalid_items), mode='exclude', inplace=True)
+            n_invalid = len(invalid_items)
+            if n_invalid > 0:
+                logger.info(f'{n_invalid} invalid items found that were ignored')
+                self.filter_by_column(
+                    Fields.ITEM, values=list(invalid_items), mode='exclude', inplace=True)
 
         n_items = len(self.metadata)
         logger.debug(f'{n_items} {"" if validate_filenames else "not"} validated items found')
@@ -1400,10 +1418,11 @@ class Dataset():
         """
         stems = dataframe[Fields.ITEM].apply(lambda x: Path(x).stem)
         if stems.nunique() == dataframe[Fields.ITEM].nunique():
-            dataframe[cls.METADATA_FIELDS.MEDIA_ID] = stems
+            media_ids = stems
         else:
-            dataframe[cls.METADATA_FIELDS.MEDIA_ID] = (
-                dataframe[Fields.ITEM].apply(get_media_id_str_from_item))
+            media_ids = dataframe[Fields.ITEM].apply(get_media_id_str_from_item)
+
+        dataframe[cls.MetadataFields.MEDIA_ID] = media_ids
 
         return dataframe
 
@@ -1454,36 +1473,24 @@ class Dataset():
 
         return cats
 
-    def _get_items(self, partition: str = None) -> list:
-        """Get a list of unique items in the dataset, optionally filtered by
-        partition name.
-
-        Parameters
-        ----------
-        partition : str or None
-            Name of the partition from which the records will be obtained.
-            If None, dataset will not be filtered.
+    def _get_items(self) -> list:
+        """Get a list of unique items in the dataset, optionally filtered by partition name.
 
         Returns
         -------
         list or set
             List of unique items in the dataset
         """
-        if partition is None:
-            if len(self.metadata) > 0:
-                items = self.metadata[Fields.ITEM].unique()
-            else:
-                items = []
+        if len(self) > 0:
+            items = self[Fields.ITEM].unique()
         else:
-            Partitions.check_partition(partition)
-            df = self.df
-            items = df.loc[df[Fields.PARTITION] == partition][Fields.ITEM].unique()
+            items = []
 
         return list(items)
 
     def _get_default_fields_of_dataset(self) -> List:
-        default_fields_anns = get_default_fields(self.ANNOTATIONS_FIELDS)
-        default_fields_meta = get_default_fields(self.METADATA_FIELDS)
+        default_fields_anns = get_default_fields(self.AnnotationFields)
+        default_fields_meta = get_default_fields(self.MetadataFields)
         default_fields = default_fields_anns + default_fields_meta
         # Drop duplicated fields
         return list(dict.fromkeys(default_fields))
@@ -1496,8 +1503,8 @@ class Dataset():
 
     @classmethod
     def _get_common_field_anns_meta(cls) -> str:
-        metadata_default_fields = set(get_default_fields(cls.METADATA_FIELDS))
-        annotations_default_fields = set(get_default_fields(cls.ANNOTATIONS_FIELDS))
+        metadata_default_fields = set(get_default_fields(cls.MetadataFields))
+        annotations_default_fields = set(get_default_fields(cls.AnnotationFields))
         common_field = list(metadata_default_fields & annotations_default_fields)
 
         assert len(common_field) == 1
@@ -1548,8 +1555,8 @@ class Dataset():
     def _verify_integrity_metadata(self, metadata: pd.DataFrame):
         assert isinstance(metadata, pd.DataFrame), "Media data must be a pd.DataFrame"
 
-        cnd = self.METADATA_FIELDS.MEDIA_ID in metadata.columns and Fields.ITEM in metadata.columns
-        msg = f"Metadata must contain the fields {self.METADATA_FIELDS.MEDIA_ID} and {Fields.ITEM}"
+        cnd = self.MetadataFields.MEDIA_ID in metadata.columns and Fields.ITEM in metadata.columns
+        msg = f"Metadata must contain the fields {self.MetadataFields.MEDIA_ID} and {Fields.ITEM}"
         assert cnd, msg
 
     #     endregion
@@ -1582,18 +1589,18 @@ class Dataset():
         assert cond, f"In order to download media you must assign media_base_url parameter"
         os.makedirs(dest_path, exist_ok=True)
 
-        def get_dest_filename(media_dict) -> str:
-            fname = cls._get_filename(media_dict, set_filename_with_id_and_ext)
+        def get_dest_filename(record) -> str:
+            fname = cls._get_filename(record, set_filename_with_id_and_ext)
             return os.path.join(dest_path, fname)
 
-        media_dict = metadata[[cls.METADATA_FIELDS.MEDIA_ID, Fields.FILE_NAME]].to_dict('records')
+        records = metadata[[cls.MetadataFields.MEDIA_ID, Fields.FILE_NAME]].to_dict('records')
 
-        logger.info(f"Downloading {len(media_dict)} media...")
+        logger.info(f"Downloading {len(records)} media...")
 
         parallel_exec(
             func=download_file,
-            elements=media_dict,
-            url=lambda img_dict: f"{media_base_url}/{img_dict[Fields.FILE_NAME]}",
+            elements=records,
+            url=lambda rec: f"{media_base_url}/{rec[Fields.FILE_NAME]}",
             dest_filename=get_dest_filename,
             verbose=False)
 
@@ -1628,13 +1635,13 @@ class Dataset():
 
     @classmethod
     def _get_filename(cls,
-                      media_dict: dict,
+                      record: dict,
                       set_filename_with_id_and_extension: str = None) -> str:
         """Get the file name of the media based on its own id.
 
         Parameters
         ----------
-        media_dict : dict
+        record : dict
             Dict that contains media information with the keys 'file_name' and 'id'
         set_filename_with_id_and_extension : str, optional
             Extension to be added to the id of each item to set the file name (default is None)
@@ -1648,11 +1655,11 @@ class Dataset():
             ext = set_filename_with_id_and_extension
             if ext.startswith('.'):
                 ext = ext[1:]
-            fname = f'{media_dict[cls.METADATA_FIELDS.MEDIA_ID]}.{ext}'
-        elif 'file_name' in media_dict:
-            fname = media_dict[Fields.FILE_NAME]
+            fname = f'{record[cls.MetadataFields.MEDIA_ID]}.{ext}'
+        elif 'file_name' in record:
+            fname = record[Fields.FILE_NAME]
         else:
-            fname = f'{media_dict[cls.METADATA_FIELDS.MEDIA_ID]}{cls.DEFAULT_EXT}'
+            fname = f'{record[cls.MetadataFields.MEDIA_ID]}{cls.DEFAULT_EXT}'
         return fname.replace('\\', '/')
 
     def _format_item_for_storage(self, item):
@@ -1669,7 +1676,7 @@ class Dataset():
         dataframe = dataframe.dropna(how='all', axis=1).fillna('')
         if kwargs.get('mapping_fields') is not None:
             dataframe = dataframe.rename(columns=kwargs['mapping_fields'])
-        if not cls.METADATA_FIELDS.MEDIA_ID in dataframe.columns:
+        if not cls.MetadataFields.MEDIA_ID in dataframe.columns:
             dataframe = cls._add_media_id_field_to_dataframe(dataframe)
 
         return dataframe
@@ -1684,9 +1691,9 @@ class Dataset():
                 and (field_modified is None or field_modified == Fields.LABEL)):
             annotations[Fields.LABEL] = annotations[Fields.LABEL].apply(get_cleaned_label)
         if field_modified is not None:
-            types = {k: v for k, v in self.ANNOTATIONS_FIELDS.TYPES.items() if k == field_modified}
+            types = {k: v for k, v in self.AnnotationFields.TYPES.items() if k == field_modified}
         else:
-            types = self.ANNOTATIONS_FIELDS.TYPES
+            types = self.AnnotationFields.TYPES
         annotations = set_field_types_in_data(annotations, field_types=types)
 
         return annotations
@@ -1699,9 +1706,9 @@ class Dataset():
             self._verify_integrity_metadata(metadata)
         metadata = metadata.drop_duplicates(subset=self._key_field_metadata).reset_index(drop=True)
         if field_modified is not None:
-            types = {k: v for k, v in self.METADATA_FIELDS.TYPES.items() if k == field_modified}
+            types = {k: v for k, v in self.MetadataFields.TYPES.items() if k == field_modified}
         else:
-            types = self.METADATA_FIELDS.TYPES
+            types = self.MetadataFields.TYPES
         metadata = set_field_types_in_data(metadata, field_types=types)
 
         return metadata
@@ -1714,10 +1721,10 @@ class Dataset():
         dataframe_fields = set(dataframe.columns.values)
         if accept_all_fields:
             common_fld = cls._get_common_field_anns_meta()
-            metadata_default_fields = set(get_default_fields(cls.METADATA_FIELDS))
+            metadata_default_fields = set(get_default_fields(cls.MetadataFields))
             annotations_fields = (dataframe_fields - metadata_default_fields) | {common_fld}
         else:
-            annotations_fields = set(get_default_fields(cls.ANNOTATIONS_FIELDS))
+            annotations_fields = set(get_default_fields(cls.AnnotationFields))
 
         annotations_fields &= dataframe_fields
         return dataframe[list(annotations_fields)]
@@ -1725,7 +1732,7 @@ class Dataset():
     @classmethod
     def _extract_metadata_from_dataframe(cls, dataframe: pd.DataFrame) -> pd.DataFrame:
         dataframe_fields = set(dataframe.columns.values)
-        metadata_default_fields = set(get_default_fields(cls.METADATA_FIELDS))
+        metadata_default_fields = set(get_default_fields(cls.MetadataFields))
         metadata_fields = metadata_default_fields & dataframe_fields
         return dataframe[list(metadata_fields)]
 

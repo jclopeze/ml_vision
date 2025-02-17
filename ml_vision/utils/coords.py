@@ -1,10 +1,12 @@
 from enum import Enum, auto
 from math import floor, ceil
-from typing import Optional, Union, Iterable
+from typing import Optional, Union, Iterable, Tuple
 from functools import partial
 
 from ml_base.utils.misc import is_array_like
 from ml_base.utils.logger import get_logger
+
+from ml_vision.utils.vision import VisionFields as VFields
 
 logger = get_logger(__name__)
 
@@ -355,3 +357,13 @@ transform_coordinates_to_absolute_str = partial(
     transform_coordinates,
     output_coords_type=CoordinatesType.absolute,
     output_data_type=CoordinatesDataType.string)
+
+
+def get_bbox_dims(record) -> Tuple[int, int]:
+    x1, y1, x2, y2 = transform_coordinates(
+        bbox=record[VFields.BBOX],
+        output_format=CoordinatesFormat.x1_y1_x2_y2,
+        media_width=record[VFields.WIDTH],
+        media_height=record[VFields.HEIGHT])
+
+    return x2-x1, y2-y1
