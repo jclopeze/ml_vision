@@ -4,17 +4,19 @@ import os
 import pandas as pd
 from multiprocessing import Manager
 from pathlib import Path
-from typing import List
+from typing import Tuple, Iterable
 
 import cv2
 
 from ml_base.utils.misc import parallel_exec
 from ml_base.utils.logger import get_logger
 
+from ml_vision.utils.vision import VisionFields as VFields
+
 logger = get_logger(__name__)
 
 
-def get_videos_dims(videos):
+def get_videos_dims(videos: Iterable[str]) -> pd.DataFrame:
     """Determine the dimensions of `videos`
 
     Parameters
@@ -64,16 +66,17 @@ def set_video_dims(video, videos_dict):
         'height': height
     }
 
-def frames_to_video(images: List[str],
+
+def frames_to_video(frames_paths: Iterable[str],
                     freq_sampling: int,
                     output_file_name: str,
                     force=False):
-    """Create a video from the set of frames specified in `images`, assuming that the video was
+    """Create a video from the set of frames specified in `frames_paths`, assuming that the video was
     previously sampled with a sampling frequency `freq_sampling`
 
     Parameters
     ----------
-    images : List[str]
+    frames_paths : List[str]
         List with the paths of the frames from which the video will be created
     freq_sampling : int
         Number of frames per second that were taken from the video when the video was split into
@@ -83,12 +86,12 @@ def frames_to_video(images: List[str],
     codec_spec : str, optional
         Code of the codec to be used in the constructor `cv2.VideoWriter_fourcc`, by default "mp4v"
     """
-    if len(images) == 0 or (os.path.isfile(output_file_name) and not force):
+    if len(frames_paths) == 0 or (os.path.isfile(output_file_name) and not force):
         return
 
     os.makedirs(os.path.dirname(output_file_name), exist_ok=True)
 
-    frame = cv2.imread(images[0])
+    frame = cv2.imread(frames_paths[0])
     height, width, _ = frame.shape
 
     # Define the codec and create VideoWriter object
@@ -96,27 +99,25 @@ def frames_to_video(images: List[str],
     fourcc = cv2.VideoWriter_fourcc(*codec_spec)
     out = cv2.VideoWriter(output_file_name, fourcc, freq_sampling, (width, height))
 
-    for image in images:
+    for image in frames_paths:
         frame = cv2.imread(image)
         out.write(frame)
 
     out.release()
 
 
-
-
-def get_image_id_for_frame(file_id, frame_filename):
+def get_file_id_for_frame(file_id, frame_filename) -> str:
     return f"{file_id}-{Path(frame_filename).stem}"
 
 
-def get_video_dims(video):
+def get_video_dims(video_path: str) -> Tuple[int, int]:
     """Open an video, get its dimensions and return it in format (width, height).
     In case an exception occurs when trying to open the video, None will be returned for both width
     and height
 
     Parameters
     ----------
-    video : str or a file object
+    video_path : str or a file object
         Path where the video is stored, or file object containing the video data
 
     Returns
@@ -125,11 +126,18 @@ def get_video_dims(video):
         The dimensions of the video in format (width, height)
     """
     try:
-        vid = cv2.VideoCapture(video)
+        vid = cv2.VideoCapture(video_path)
         height = vid.get(cv2.CAP_PROP_FRAME_HEIGHT)
         width = vid.get(cv2.CAP_PROP_FRAME_WIDTH)
     except:
-        logger.exception(f"Exception occurred while opening video {video}")
+        logger.exception(f"Exception occurred while opening video {video_path}")
         width, height = None, None
 
     return width, height
+
+
+def get_frame_numbers_from_vids(dataframe: pd.DataFrame) -> dict:
+    return (dataframe[[VFields.ITEM, VFields.VID_FRAME_NUM]]
+            .groupby(VFields.ITEM)
+            .apply(lambda x: sorted(set(x[VFields.VID_FRAME_NUM].tolist())))
+            .to_dict())

@@ -4,7 +4,7 @@ import logging
 import tempfile
 import platform
 
-from .env import ENV, ENVS
+from ml_base.utils.env import ENV, ENVS
 from pdb import set_trace
 
 LOGGING_PATH = os.environ.get('LOGGING_PATH')

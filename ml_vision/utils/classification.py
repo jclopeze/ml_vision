@@ -120,7 +120,7 @@ def set_label_and_score_for_item_in_ensemble(item: str,
     Parameters
     ----------
     item : str
-        Item to be analysed. It must be contained in the column "item" of each value (`DataFrame`)
+        Item to be analysed. It must be contained in the field "item" of each value (`DataFrame`)
         of `models_to_dfs`
     models_to_dfs : dict
         Dictionary containing the results of the predictions made by the models,

@@ -7,11 +7,11 @@ from typing import Optional
 
 import math
 import numpy as np
-from typing import Iterable, Union, Callable, List
+from typing import Iterable, Union, List
 import uuid
 
-from .misc import is_array_like
-from .logger import get_logger
+from ml_base.utils.misc import is_array_like
+from ml_base.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -145,122 +145,10 @@ def write_labelmap_file(labelmap: dict, dest_path: str) -> str:
     return dest_path
 
 
-def get_mapping_classes(mapping_classes: Union[dict, str],
-                        from_col: Union[str, int] = None,
-                        to_col: Union[str, int] = None,
-                        filter_expr: Callable = None) -> Optional[dict]:
-    """Function that gets a mapping of categories, either to group them into super-categories or to
-    match them to those in other datasets.
-    The mapping can be done either with a dictionary or with a CSV file.
-    In both cases you can use the wildcard `*` (as the `key` of the dict or the column `0` of the
-    CSV) to indicate 'all other current categories in the data set'.
-    E.g., `{'Homo sapiens': 'Person', '*': 'Animal'}` will designate the Homo sapiens category as
-    'Person' and the rest of the categories as 'Animal'.
-    By default, the resulting mappings will be in the form `{orig_cat_id: dest_cat_name}`
-
-    Parameters
-    ----------
-    mapping_classes : dict or str or None
-        Dictionary or path to a CSV file containing the mappings.
-        In the case of a dictionary, the `key` of each element is the current name of the category,
-        and `value` is the name to be given to that category.
-        In the case of a CSV file, the file must contain two columns and have no header.
-        The column `0` is the current name of the category, and the column `1` is the name to be
-        given to that category.
-        If None, None is returned
-    from_col : str or int, optional
-        Name or position (0-based) of the column to be used as 'from' in the mapping, in case of
-        `mapping_classes` is a CSV. By default None
-    to_col : str or int, optional
-        Name or position (0-based) of the column to be used as 'to' in the mapping, in case of
-        `mapping_classes` is a CSV. By default None
-    filter_expr : Callable, optional
-        A Callable that will be used to filter the CSV records in which the mapping is found,
-        in case of `mapping_classes` is a CSV. By default None
-
-    Returns
-    -------
-    dict
-        Dictionary containing the category mappings
-
-    Raises
-    ------
-    ValueError
-        In case `mapping_classes` is neither dictionary nor file path
-    """
-    if mapping_classes is None:
-        return None
-    if type(mapping_classes) == dict:
-        return get_mapping_classes_from_dict(mapping_classes_dict=mapping_classes)
-    elif os.path.isfile(mapping_classes):
-        return get_mapping_classes_from_csv(
-            mapping_classes_csv=mapping_classes,
-            from_col=from_col, to_col=to_col, filter_expr=filter_expr)
-    else:
-        raise ValueError(f"Invalid value for mapping_classes")
-
-
-def get_mapping_classes_from_csv(mapping_classes_csv: str,
-                                 from_col: Union[str, int] = None,
-                                 to_col: Union[str, int] = None,
-                                 filter_expr: Callable = None) -> Optional[dict]:
-    """Function that gets a mapping of categories, either to group them into super-categories or to
-    match them to those in other datasets, from the definitions contained in `mapping_classes_csv`.
-    You can use the wildcard `*` in the column `0` to indicate 'all other current categories in the
-    dataset'. E.g.,
-       `Homo sapiens  |   Person`
-        `*          |   Animal`
-    will designate the 'Homo sapiens' category as 'Person' and the rest of the categories as
-    'Animal'.
-    By default, the resulting mappings will be in the form {`orig_cat_id`: `dest_cat_name`}
-
-    Parameters
-    ----------
-    mapping_classes_csv : str
-        Path to a CSV file containing the mappings. The file must contain two columns and have no
-        header. The column `0` is the current name of the category and the column `1` is the name
-        to be given to that category.
-    from_col : str or int, optional
-        Name or position (0-based) of the column to be used as 'from' in the mapping,
-        by default None
-    to_col : str or int, optional
-        Name or position (0-based) of the column to be used as 'to' in the mapping,
-        by default None
-    filter_expr : Callable, optional
-        A Callable that will be used to filter the CSV records in which the mapping is found.
-        By default None
-
-    Returns
-    -------
-    dict
-        Dictionary containing the category mappings
-
-    """
-    if not os.path.isfile(mapping_classes_csv):
-        return None
-    mapping_classes_dict = {}
-    if from_col is not None and to_col is not None:
-        df = pd.read_csv(mapping_classes_csv, header=0, na_values=['nan'], keep_default_na=False)
-        if callable(filter_expr):
-            df = df[df.apply(filter_expr, axis=1)].reset_index(drop=True)
-        df = df.rename(columns={from_col: 'from', to_col: 'to'})[['from', 'to']]
-    else:
-        df = pd.read_csv(mapping_classes_csv, header=None, names=["from", "to"],
-                         na_values=['nan'], keep_default_na=False)
-    for _, x in df.iterrows():
-        if type(x["from"]) is str:
-            key = get_cleaned_label(x["from"])
-        else:
-            key = x["from"]
-        value = x["to"]
-        mapping_classes_dict[key] = get_cleaned_label(value)
-    return mapping_classes_dict
-
-
-def get_mapping_classes_from_dict(mapping_classes_dict: dict) -> dict:
-    """Function that gets a mapping of categories, either to group them into super-categories or to
+def fix_category_mapping(category_mapping: dict) -> dict:
+    """Gets a mapping of categories, either to group them into super-categories or to
     match them to those in other datasets, from the definitions contained in
-    `mapping_classes_dict`.
+    `category_mapping`.
     You can use the wildcard `*` as the `key` to indicate 'all other current categories in the
     dataset'. E.g.,
     E.g., `{'Homo sapiens': 'Person', '*': 'Animal'}` will designate the Homo sapiens category as
@@ -269,7 +157,7 @@ def get_mapping_classes_from_dict(mapping_classes_dict: dict) -> dict:
 
     Parameters
     ----------
-    mapping_classes_dict : dict
+    category_mapping : dict
         Dictionary containing the mappings. The `key` of each element is the current name of the
         category, and `value` is the name to be given to that category.
 
@@ -280,7 +168,7 @@ def get_mapping_classes_from_dict(mapping_classes_dict: dict) -> dict:
 
     """
     mapping_classes_dict_new = {}
-    for key, value in mapping_classes_dict.items():
+    for key, value in category_mapping.items():
         if type(key) is str:
             key = get_cleaned_label(key)
         mapping_classes_dict_new[key] = get_cleaned_label(value)
@@ -301,7 +189,7 @@ class Fields():
     FILE_NAME = "file_name"
     DATE_CAPTURED = "date_captured"
     LOCATION = "location"
-    MEDIA_ID = "file_id"
+    FILE_ID = "file_id"
     SCORE = "score"
 
 
@@ -403,7 +291,7 @@ def sample_data(data: pd.DataFrame,
             return sample_num(x, n=n_val, rand_state=rand_state)
         return x
 
-    # Rudimentary way to avoid grouping by any column
+    # Rudimentary way to avoid grouping by any field
     if groupby is None or (groupby == 'label' and Fields.LABEL not in data):
         data['dummy_col'] = 'dummy_val'
         groupby = 'dummy_col'
@@ -541,7 +429,8 @@ def fix_partitioning_by_priorities(df, partitions_to_idx, priority_order=['train
 
 
 def get_abspath_and_validate_item(item,
-                                  root_dir,
+                                  old_root_dir,
+                                  new_root_dir,
                                   validate_filenames=True,
                                   not_exist_ok=False,
                                   items_to_abspaths=None,
@@ -566,8 +455,12 @@ def get_abspath_and_validate_item(item,
         not present
 
     """
-    if root_dir is not None and not item.startswith(root_dir):
-        new_item = os.path.normpath(os.path.join(root_dir, item))
+    if new_root_dir is not None and not item.startswith(new_root_dir):
+        if old_root_dir:
+            _item = os.path.relpath(item, old_root_dir)
+        else:
+            _item = item
+        new_item = os.path.normpath(os.path.join(new_root_dir, _item))
     else:
         new_item = item
 
@@ -592,7 +485,7 @@ def map_category(cat_name: str, cat_mappings: dict) -> str:
     return cat_name
 
 
-def get_media_id_str_from_item(item):
+def get_file_id_str_from_item(item):
     item = (item
             .replace(' ', '_')
             .replace('..', '_')

@@ -320,7 +320,7 @@ class INatDataset(ImageDataset):
         photo_id_fld = INatMetadata.Photo.PHOTO_ID
         data[cls.AnnotationFields.ID] = (
             df.apply(lambda rec: f"{rec[obs_uuid_fld]}-{rec[photo_id_fld]}", axis=1))
-        data[cls.MetadataFields.MEDIA_ID] = df[INatMetadata.Photo.PHOTO_ID].copy()
+        data[cls.MetadataFields.FILE_ID] = df[INatMetadata.Photo.PHOTO_ID].copy()
         data[cls.MetadataFields.FILENAME] = data[cls.AnnotationFields.ITEM].copy()
         data[cls.MetadataFields.SEQ_ID] = df[INatMetadata.Observation.OBSERVATION_UUID].copy()
 
@@ -426,7 +426,7 @@ class INatDataset(ImageDataset):
         assert_cond = taxonomy_level_to in self.AnnotationFields._TAXA_RANKS_NAMES
         assert assert_cond, "Invalid taxonomy_level_to"
 
-        self.filter_by_column(taxonomy_level_to, '', mode='exclude', inplace=True)
+        self.filter_by_field(taxonomy_level_to, '', mode='exclude', inplace=True)
         self['label'] = lambda record: record[taxonomy_level_to]
 
     @classmethod
@@ -472,11 +472,11 @@ class INatDataset(ImageDataset):
 
         def get_inat_url(record):
             return INatMetadata.inat_url_str.format(
-                photo_id=record[cls.MetadataFields.MEDIA_ID],
+                photo_id=record[cls.MetadataFields.FILE_ID],
                 images_size=images_size,
                 ext=os.path.splitext(record[cls.MetadataFields.FILENAME])[1].replace('.', ''))
 
-        media_dict = metadata[[cls.MetadataFields.MEDIA_ID,
+        media_dict = metadata[[cls.MetadataFields.FILE_ID,
                                cls.MetadataFields.FILENAME]].to_dict('records')
         logger.info(f"Downloading {len(media_dict)} images...")
 
@@ -501,7 +501,7 @@ class INatDataset(ImageDataset):
 
         if len(bad_items_list) > 0:
             logger.info(f'Removing {len(bad_items_list)} corrupted images')
-            self.filter_by_column(
+            self.filter_by_field(
                 self.AnnotationFields.ITEM, list(bad_items_list), mode='exclude', inplace=True)
 
     @classmethod

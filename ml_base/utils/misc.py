@@ -1,15 +1,16 @@
 import os
 from math import floor
 import platform
+import shutil
 import sys
 import tempfile
 import urllib.request
 import zipfile
+from typing import Union
 
-from functools import reduce
 import multiprocessing
 
-from .logger import get_logger, debugger
+from ml_base.utils.logger import get_logger, debugger
 
 logger = get_logger(__name__)
 debug_parallel = debugger.get_debug_parallel_env()
@@ -210,3 +211,9 @@ def unzip_file(input_file: str, output_folder: str = None) -> None:
     with zipfile.ZipFile(input_file, 'r') as zf:
         zf.extractall(output_folder)
 
+def delete_dirs(dirs_to_del: Union[str, list[str]]):
+    if dirs_to_del is None:
+        return
+    if not is_array_like(dirs_to_del):
+        dirs_to_del = [dirs_to_del]
+    parallel_exec(func=shutil.rmtree, elements=dirs_to_del, path=lambda dir_to_del: dir_to_del)

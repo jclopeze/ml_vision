@@ -2,7 +2,9 @@ from __future__ import annotations
 import os
 import pandas as pd
 from shutil import move
+from typing import Callable, Union, Optional
 
+from ml_base.utils.dataset import get_cleaned_label
 from ml_base.utils.misc import get_temp_folder
 from ml_base.utils.misc import parallel_exec
 from ml_base.utils.misc import download_file
@@ -282,6 +284,7 @@ class LILADataset(ImageDataset):
         if collection is not None and 'mapping_fields' not in kwargs:
             kwargs['mapping_fields'] = LILADataset.mapping_fields[collection]
 
+        category_mapping = None
         if map_to_scientific_names:
             mapping_classes_csv = kwargs.get('mapping_classes_csv')
             if mapping_classes_csv is None or not os.path.isfile(mapping_classes_csv):
@@ -294,12 +297,15 @@ class LILADataset(ImageDataset):
                     move(file_path, mapping_classes_csv)
             coll_name = (
                 collection.split('_bbox')[0] if collection.endswith('_bbox') else collection)
-            kwargs['mapping_classes'] = mapping_classes_csv
-            kwargs['mapping_classes_from_col'] = 'query'
-            kwargs['mapping_classes_to_col'] = 'scientific_name'
-            kwargs['mapping_classes_filter_expr'] = lambda rec: rec['dataset_name'] == coll_name
 
-        instance = super().from_json(source_path=source_path, **kwargs)
+            category_mapping = get_mapping_classes_from_csv(
+                mapping_classes_csv=mapping_classes_csv,
+                from_col='query',
+                to_col='scientific_name',
+                filter_expr=lambda rec: rec['dataset_name'] == coll_name)
+
+        instance = super().from_json(
+            source_path=source_path, category_mapping=category_mapping, **kwargs)
 
         if map_to_scientific_names and exclude_invalid_scinames:
             instance.filter_by_categories('', mode='exclude', inplace=True)
@@ -307,7 +313,7 @@ class LILADataset(ImageDataset):
         if map_image_id_field:
             if collection in LILADataset.mapping_image_id_rules:
                 mapping_img_id_rule = LILADataset.mapping_image_id_rules[collection]
-                instance[VisionFields.MEDIA_ID] = mapping_img_id_rule
+                instance[VisionFields.FILE_ID] = mapping_img_id_rule
 
         instance[LILADataset.MetadataFields.COLLECTION] = collection
 
@@ -338,7 +344,7 @@ class LILADataset(ImageDataset):
         assert_cond = taxonomy_level_to in self.AnnotationFields._TAXA_RANKS_NAMES
         assert assert_cond, "Invalid taxonomy_level_to"
 
-        self.filter_by_column(taxonomy_level_to, '', mode='exclude', inplace=True)
+        self.filter_by_field(taxonomy_level_to, '', mode='exclude', inplace=True)
         self['label'] = lambda rec: rec[taxonomy_level_to]
 
     @classmethod
@@ -366,3 +372,58 @@ class LILADataset(ImageDataset):
             instance._set_abspaths_and_validate_filenames(root_dir_prov, not_exist_ok=True)
 
         return instance
+
+
+def get_mapping_classes_from_csv(mapping_classes_csv: str,
+                                 from_col: Union[str, int] = None,
+                                 to_col: Union[str, int] = None,
+                                 filter_expr: Callable = None) -> dict:
+    """Function that gets a mapping of categories, either to group them into super-categories or to
+    match them to those in other datasets, from the definitions contained in `mapping_classes_csv`.
+    You can use the wildcard `*` in the column `0` to indicate 'all other current categories in the
+    dataset'. E.g.,
+       `Homo sapiens  |   Person`
+        `*          |   Animal`
+    will designate the 'Homo sapiens' category as 'Person' and the rest of the categories as
+    'Animal'.
+    By default, the resulting mappings will be in the form {`orig_cat_id`: `dest_cat_name`}
+
+    Parameters
+    ----------
+    mapping_classes_csv : str
+        Path to a CSV file containing the mappings. The file must contain two columns and have no
+        header. The column `0` is the current name of the category and the column `1` is the name
+        to be given to that category.
+    from_col : str or int, optional
+        Name or position (0-based) of the column to be used as 'from' in the mapping,
+        by default None
+    to_col : str or int, optional
+        Name or position (0-based) of the column to be used as 'to' in the mapping,
+        by default None
+    filter_expr : Callable, optional
+        A Callable that will be used to filter the CSV records in which the mapping is found.
+        By default None
+
+    Returns
+    -------
+    dict
+        Dictionary containing the category mappings
+
+    """
+    mapping_classes_dict = {}
+    if from_col is not None and to_col is not None:
+        df = pd.read_csv(mapping_classes_csv, header=0, na_values=['nan'], keep_default_na=False)
+        if callable(filter_expr):
+            df = df[df.apply(filter_expr, axis=1)].reset_index(drop=True)
+        df = df.rename(columns={from_col: 'from', to_col: 'to'})[['from', 'to']]
+    else:
+        df = pd.read_csv(mapping_classes_csv, header=None, names=["from", "to"],
+                         na_values=['nan'], keep_default_na=False)
+    for _, x in df.iterrows():
+        if type(x["from"]) is str:
+            key = get_cleaned_label(x["from"])
+        else:
+            key = x["from"]
+        value = x["to"]
+        mapping_classes_dict[key] = get_cleaned_label(value)
+    return mapping_classes_dict

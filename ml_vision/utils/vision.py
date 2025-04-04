@@ -9,7 +9,7 @@ class VisionFields(Fields):
     FILE_TYPE = "file_type"
 
     VID_FRAME_NUM = 'video_frame_num'
-    PARENT_MEDIA_ID = "parent_media_id"
+    PARENT_FILE_ID = "parent_file_id"
     SCORE_DET = "score_det"
 
 

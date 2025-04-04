@@ -16,9 +16,9 @@ from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from .utils.dataset import seek_files
 from .utils.dataset import fix_partitioning_by_priorities
 from .utils.dataset import append_to_partition
-from .utils.dataset import get_media_id_str_from_item
+from .utils.dataset import get_file_id_str_from_item
 from .utils.dataset import get_cleaned_label
-from .utils.dataset import get_mapping_classes
+from .utils.dataset import fix_category_mapping
 from .utils.dataset import map_category
 from .utils.dataset import set_field_types_in_data
 from .utils.dataset import get_random_id
@@ -42,15 +42,16 @@ pd.options.mode.chained_assignment = None
 
 class Dataset():
 
+    # region FIELDS DEFINITIONS
     class MetadataFields():
         ITEM: Final = Fields.ITEM
-        MEDIA_ID: Final = Fields.MEDIA_ID
+        FILE_ID: Final = Fields.FILE_ID
         FILENAME: Final = Fields.FILE_NAME
         DATE_CAPTURED: Final = Fields.DATE_CAPTURED
         LOCATION: Final = Fields.LOCATION
 
         TYPES = {
-            MEDIA_ID: str,
+            FILE_ID: str,
             LOCATION: str
         }
 
@@ -65,15 +66,20 @@ class Dataset():
             ID: str,
             SCORE: float
         }
+    # endregion
 
+    # region CONSTANT PROPERTIES
     FILES_EXTS: Final = []
     DEFAULT_EXT: Final = ""
-    # region SPECIAL METHODS
+    # endregion
 
+    # region SPECIAL METHODS
     def __repr__(self):
         return repr(self.df)
 
     def __len__(self):
+        if self.is_empty:
+            return 0
         return len(self.annotations)
 
     def __iter__(self):
@@ -82,6 +88,11 @@ class Dataset():
             yield record
 
     def __getitem__(self, fields):
+        if self.is_empty:
+            if isinstance(fields, str):
+                return pd.Series()
+            else:
+                return pd.DataFrame()
         return self.df[fields]
 
     def __setitem__(self, field, value):
@@ -173,21 +184,24 @@ class Dataset():
                  metadata: pd.DataFrame,
                  root_dir: str = None,
                  use_partitions: bool = True,
+                 validate_filenames: bool = True,
+                 not_exist_ok: bool = False,
+                 avoid_initialization: bool = False,
                  **kwargs) -> Dataset:
-        avoid_initialization = kwargs.get('avoid_initialization', False)
-        if avoid_initialization or (annotations is None or len(annotations) == 0):
+        is_empty = annotations is None or len(annotations) == 0
+        if avoid_initialization or is_empty:
             self._set_annotations(annotations)
             self._set_metadata(metadata)
             self._set_root_dir(root_dir)
             return
 
-        verify_integrity = kwargs.get('verify_integrity', True)
-        self._fit_and_set_annotations(annotations, verify_integrity=verify_integrity)
-        self._fit_and_set_metadata(metadata, verify_integrity=verify_integrity)
+        self._fit_and_set_annotations(annotations, verify_integrity=True)
+        self._fit_and_set_metadata(metadata, verify_integrity=True)
 
         self._verify_annotations_and_metadata_consistency()
         self._apply_filters_and_mappings(**kwargs)
-        self._set_abspaths_and_validate_filenames(root_dir, **kwargs)
+        self._set_abspaths_and_validate_filenames(
+            root_dir, validate_filenames=validate_filenames, not_exist_ok=not_exist_ok)
         self._split(use_partitions)
 
     # endregion
@@ -200,32 +214,43 @@ class Dataset():
     def from_dataframe(cls,
                        dataframe: pd.DataFrame,
                        root_dir: str,
+                       accept_all_fields: bool = False,
+                       mapping_fields: dict = None,
+                       use_partitions: bool = True,
+                       validate_filenames: bool = True,
+                       not_exist_ok: bool = False,
+                       avoid_initialization: bool = False,
                        **kwargs) -> Dataset:
-        """
-        Parameters
-        ----------
-        data : pd.DataFrame
-            DataFrame object that make up the dataset.
-        **kwargs
-            Extra named arguments
-        """
         assert isinstance(dataframe, pd.DataFrame), "A pd.DataFrame must be provided for data"
         if len(dataframe) == 0:
             logger.debug(f"The dataset does not contain any elements.")
             return cls(annotations=None, metadata=None)
 
-        dataframe = cls._fit_dataframe(dataframe, **kwargs)
-        annotations = cls._extract_annotations_from_dataframe(dataframe, **kwargs)
+        dataframe = cls._fit_dataframe(dataframe, mapping_fields)
+        annotations = cls._extract_annotations_from_dataframe(dataframe, accept_all_fields)
         metadata = cls._extract_metadata_from_dataframe(dataframe)
 
-        instance = cls(annotations, metadata, root_dir, **kwargs)
-
+        instance = cls(annotations,
+                       metadata,
+                       root_dir,
+                       use_partitions=use_partitions,
+                       validate_filenames=validate_filenames,
+                       not_exist_ok=not_exist_ok,
+                       avoid_initialization=avoid_initialization,
+                       **kwargs)
         return instance
 
     @classmethod
     def from_json(cls,
                   source_path: str,
                   root_dir: str,
+                  accept_all_fields: bool = False,
+                  mapping_fields: dict = None,
+                  use_partitions: bool = True,
+                  validate_filenames: bool = True,
+                  not_exist_ok: bool = False,
+                  include_bboxes_with_label_empty: bool = False,
+                  set_filename_with_id_and_extension: str = None,
                   **kwargs) -> Dataset:
         """Create a Dataset from a json file in COCO format.
 
@@ -246,15 +271,28 @@ class Dataset():
         if source_path is not None:
             logger.info(f"Creating dataset from JSON file {abspath}")
 
-        df = cls._get_dataframe_from_json(source_path, **kwargs)
+        df = cls._get_dataframe_from_json(source_path,
+                                          include_bboxes_with_label_empty,
+                                          set_filename_with_id_and_extension)
 
-        return cls.from_dataframe(df, root_dir, **kwargs)
+        return cls.from_dataframe(df,
+                                  root_dir,
+                                  accept_all_fields=accept_all_fields,
+                                  mapping_fields=mapping_fields,
+                                  use_partitions=use_partitions,
+                                  validate_filenames=validate_filenames,
+                                  not_exist_ok=not_exist_ok,
+                                  **kwargs)
 
     @classmethod
     def from_csv(cls,
                  source_path: str,
                  root_dir: str,
-                 column_mapping: dict = None,
+                 accept_all_fields: bool = False,
+                 mapping_fields: dict = None,
+                 use_partitions: bool = True,
+                 validate_filenames: bool = True,
+                 not_exist_ok: bool = False,
                  **kwargs) -> Dataset:
         """Create a Dataset from a csv file.
 
@@ -265,13 +303,13 @@ class Dataset():
             converted into a Dataset.
             The csv file(s) must have at least two columns, which represents
             `item` and `label` data.
-        column_mapping : dict, optional
-            Dictionary to map column names in dataset.
-            If header=True mapping must be done by the column names,
+        mapping_fields : dict, optional
+            Dictionary to map field names in dataset.
+            If header=True mapping must be done by the field names,
             otherwise must be done by column positions.
             E.g.::
-                header=True: column_mapping={"c1": "item", "c2": "label"}
-                header=False: column_mapping={0: "item", 1: "label"}
+                header=True: mapping_fields={"c1": "item", "c2": "label"}
+                header=False: mapping_fields={0: "item", 1: "label"}
             (default is None)
         **kwargs :
             Extra named arguments
@@ -288,11 +326,19 @@ class Dataset():
             assert os.path.isfile(abspath)
             logger.info(f"Creating dataset from CSV file {abspath}")
 
-        df = cls._get_dataframe_from_csv(source_path=source_path, **kwargs)
+        df = cls._get_dataframe_from_csv(source_path=source_path)
 
-        kwargs['mapping_fields'] = column_mapping
-        return cls.from_dataframe(df, root_dir, **kwargs)
+        return cls.from_dataframe(df,
+                                  root_dir,
+                                  accept_all_fields=accept_all_fields,
+                                  mapping_fields=mapping_fields,
+                                  use_partitions=use_partitions,
+                                  validate_filenames=validate_filenames,
+                                  not_exist_ok=not_exist_ok,
+                                  **kwargs)
 
+    # TODO: allow to configure the way in which the labels are taken; e.g., last folder, first folder, join folder, etc.
+    # TODO: add argument use_partitions
     @classmethod
     def from_folder(cls,
                     source_path: str,
@@ -328,10 +374,12 @@ class Dataset():
         folder_path = os.path.abspath(source_path)
         logger.info(f"Creating dataset from folder {folder_path}")
 
-        df = cls._get_dataframe_from_folder(source_path, extensions, use_labels, **kwargs)
+        df = cls._get_dataframe_from_folder(source_path, extensions, use_labels=use_labels)
 
-        kwargs['validate_filenames'] = False
-        return cls.from_dataframe(df, root_dir=source_path, **kwargs)
+        return cls.from_dataframe(df,
+                                  root_dir=source_path,
+                                  validate_filenames=False,
+                                  **kwargs)
 
     @classmethod
     def from_datasets(cls,
@@ -354,16 +402,16 @@ class Dataset():
         datasets = []
         for dataset in args:
             assert isinstance(dataset, Dataset), f"{type(dataset)} is not a Dataset instance."
-            datasets.append(dataset)
+            _dataset = cls.cast(dataset)
+            datasets.append(_dataset)
 
         annotations, metadata, root_dir = cls._get_concat_data_from_datasets(datasets)
 
-        kwargs['validate_filenames'] = kwargs.get('validate_filenames', False)
-        return cls(annotations, metadata, root_dir, **kwargs)
+        return cls(annotations, metadata, root_dir, validate_filenames=False, **kwargs)
 
     #   endregion
 
-    #   region TO_* METHODS
+    #   region STORAGE METHODS
 
     def to_folder(self: Dataset,
                   dest_path: str,
@@ -489,7 +537,7 @@ class Dataset():
 
     #   endregion
 
-    #   region AS_* METHODS
+    #   region ACCESSORS
 
     def as_dataframe(self: Dataset, columns: List[str] = None) -> pd.DataFrame:
         """Gets a DataFrame representation of the Dataset.
@@ -518,10 +566,6 @@ class Dataset():
 
         return df
 
-    #   endregion
-
-    #   region GET_* METHODS
-
     def get_chunk(self, num_chunks: int, chunk_num: int) -> Dataset:
         """Function that divides the elements of a dataset into `num_chunks` chunks and
         returns a dataset with the elements of chunk number `chunk_num`
@@ -544,26 +588,8 @@ class Dataset():
             return self
 
         items = get_chunk_func(self.items, num_chunks, chunk_num, sort_elements=True)
-        new_ds = self.filter_by_column(Fields.ITEM, items, inplace=False)
+        new_ds = self.filter_by_field(Fields.ITEM, items, inplace=False)
         return new_ds
-
-    def get_annotations(self,
-                        columns: Union[str, Iterable] = None,
-                        remove_fields: Union[str, Iterable] = None) -> pd.DataFrame:
-        if self.is_empty:
-            return pd.DataFrame()
-
-        if columns is not None and not is_array_like(columns):
-            columns = [columns]
-        if remove_fields is not None and not is_array_like(remove_fields):
-            remove_fields = [remove_fields]
-
-        annotations_fields = set(self.annotations.columns.values)
-        if remove_fields is not None:
-            annotations_fields -= set(remove_fields)
-        if columns is not None:
-            annotations_fields = annotations_fields & set(columns)
-        return self[list(annotations_fields)]
 
     #   endregion
 
@@ -574,7 +600,7 @@ class Dataset():
     def set_field_values(self,
                          field: str,
                          values: Union[Callable, pd.DataFrame, object],
-                         inplace: bool = True):
+                         inplace: bool = True) -> Dataset:
         """Method that assigns the information of the `field` from the information of the
         annotations fields by applying the expression `expr`
 
@@ -624,15 +650,15 @@ class Dataset():
         return instance
 
     def map_categories(self,
-                       mapping_classes: Union[dict, str],
-                       inplace: bool = True) -> Union[None, Dataset]:
+                       category_mapping: dict,
+                       inplace: bool = True) -> Dataset:
         """Function that performs a mapping of the categories that a dataset contains, changing the
-        value of the column `label` of the rows of each category by its corresponding target value
+        value of the field `label` of the rows of each category by its corresponding target value
 
         Parameters
         ----------
-        mapping_classes : Union[dict, str]
-            Dictionary or path to a CSV file containing the mappings
+        category_mapping : Union[dict, str]
+            Dictionary containing the mappings
         inplace : bool, optional
             If True, perform operation in-place, by default True
 
@@ -642,16 +668,16 @@ class Dataset():
             Instance of the Dataset
         """
         if self.is_empty:
-            return
+            return self
         assert_msg = "The dataset doesn't contain the 'label' field"
         assert Fields.LABEL in self.annotations.columns, assert_msg
 
         instance = self if inplace else self.copy()
-        mapping_classes_dict = get_mapping_classes(mapping_classes)
+        category_mapping = fix_category_mapping(category_mapping)
         anns = instance.annotations
-        for from_cat, to_cat in mapping_classes_dict.items():
+        for from_cat, to_cat in category_mapping.items():
             if from_cat == '*' and to_cat != '*':
-                remaining_cats = set(mapping_classes_dict.values()) - {to_cat}
+                remaining_cats = set(category_mapping.values()) - {to_cat}
                 anns.loc[~anns[Fields.LABEL].isin(remaining_cats), Fields.LABEL] = to_cat
             else:
                 anns.loc[anns[Fields.LABEL] == from_cat, Fields.LABEL] = to_cat
@@ -808,23 +834,27 @@ class Dataset():
             Instance of the Dataset
         """
         cats = get_cats_from_source(categories)
-        return self.filter_by_column(Fields.LABEL, cats, mode=mode, inplace=inplace)
+        return self.filter_by_field(Fields.LABEL, cats, mode=mode, inplace=inplace)
 
-    def filter_by_column(self,
-                         column: str,
-                         values: Union[Iterable, Any],
-                         mode: Literal['include', 'exclude'] = 'include',
-                         inplace: bool = True) -> Optional[Dataset]:
-        """Method that filters the dataset by field `column`
+    # TODO: remove asap
+    def filter_by_column(self, column, values, mode='include', inplace=True) -> Dataset:
+        return self.filter_by_field(column, values, mode, inplace)
+
+    def filter_by_field(self,
+                        field: str,
+                        values: Union[Iterable, Any],
+                        mode: Literal['include', 'exclude'] = 'include',
+                        inplace: bool = True) -> Dataset:
+        """Method that filters the dataset by field `field`
 
         Parameters
         ----------
-        column : str
-            Name of the column to filter
+        field : str
+            Name of the field to filter by
         values : list or str
-            Values to filter
+            Values to filter by
         mode : str, optional
-            Whether to 'include' or 'remove' registers with `values` in `column` in the dataset,
+            Whether to 'include' or 'remove' registers with `values` in `field` in the dataset,
             by default 'include'
         inplace : bool, optional
             If True, perform operation in-place, by default True
@@ -845,13 +875,13 @@ class Dataset():
         df = instance.df
 
         if mode == 'include':
-            df = df[df[column].isin(values)]
+            df = df[df[field].isin(values)]
         else:
-            df = df[~df[column].isin(values)]
+            df = df[~df[field].isin(values)]
 
         instance._update_modified_dataset(df)
 
-        logger.debug(f"The elements of the dataset were filtered by the field '{column}' "
+        logger.debug(f"The elements of the dataset were filtered by the field '{field}' "
                      f"and {len(instance)} elements were obtained.")
 
         return instance
@@ -879,14 +909,14 @@ class Dataset():
         """
         if partition is not None:
             Partitions.check_partition(partition)
-            return self.filter_by_column(Fields.PARTITION, partition, mode=mode, inplace=inplace)
+            return self.filter_by_field(Fields.PARTITION, partition, mode=mode, inplace=inplace)
         return self
 
     def filter_by_label_counts(self,
                                min_label_counts: int = None,
                                max_label_counts: int = None,
                                label_counts: int = None,
-                               inplace: bool = True) -> Optional[Dataset]:
+                               inplace: bool = True) -> Dataset:
         """Filter the dataset with respect to the number of samples per label it contains
 
         Parameters
@@ -929,19 +959,19 @@ class Dataset():
                         min_score: float = None,
                         score: float = None,
                         column_name: str = Fields.SCORE,
-                        inplace: bool = True) -> Optional[Dataset]:
-        """Method that filters the predictions by the `score` column
+                        inplace: bool = True) -> Dataset:
+        """Method that filters the predictions by the `score` field
 
         Parameters
         ----------
         max_score : float, optional
-            Float number in [0.,1.] that indicates the maximum value of the `score` column,
+            Float number in [0.,1.] that indicates the maximum value of the `score` field,
             by default None
         min_score : float, optional
-            Float number in [0.,1.] that indicates the minimum value of the `score` column,
+            Float number in [0.,1.] that indicates the minimum value of the `score` field,
             by default None
         score : float, optional
-            Float number in [0.,1.] that indicates the exact value of the `score` column,
+            Float number in [0.,1.] that indicates the exact value of the `score` field,
             by default None
         column_name : str, optional
             Column name of the score field in `self._anns_data`, by default "score"
@@ -973,7 +1003,7 @@ class Dataset():
     def filter(self,
                expr: Callable,
                mode: Literal['include', 'exclude'] = 'include',
-               inplace: bool = True) -> Optional[Dataset]:
+               inplace: bool = True) -> Dataset:
         """Method that filters the dataset by applying `expr` to every element
 
         Parameters
@@ -1014,7 +1044,7 @@ class Dataset():
                use_labels: bool = False,
                use_partitions: bool = False,
                random_state: int = None,
-               inplace: bool = True) -> Optional[Dataset]:
+               inplace: bool = True) -> Dataset:
         """Method that samples the elements of a Dataset by grouping them by their `label` and
         taking a random number determined by the value of `n`.
 
@@ -1083,7 +1113,7 @@ class Dataset():
 
     #   endregion
 
-    #   region FACTORY METHODS
+    #   region DUPLICATION METHODS
 
     def copy(self) -> Dataset:
         """Create a copy of the dataset
@@ -1097,7 +1127,11 @@ class Dataset():
 
     @classmethod
     def cast(cls, dataset: Dataset) -> Dataset:
-        return cls._copy_dataset(dataset)
+        instance = cls(dataset.annotations,
+                       dataset.metadata,
+                       dataset.root_dir,
+                       avoid_initialization=True)
+        return instance
 
     #   endregion
 
@@ -1136,11 +1170,15 @@ class Dataset():
         raise NotImplementedError
 
     @classmethod
-    def _get_dataframe_from_csv(cls, source_path: str, **kwargs) -> pd.DataFrame:
-        usecols = kwargs.get('usecols')
-        na_values = kwargs.get('na_values', 'nan').split(',')
-        header = kwargs.get('header', 0)
-        keep_default_na = kwargs.get('keep_default_na', False)
+    def _get_dataframe_from_csv(cls,
+                                source_path: str,
+                                na_values='nan',
+                                header=0,
+                                usecols=None,
+                                keep_default_na: bool = False,
+                                regex_filename=None) -> pd.DataFrame:
+
+        na_values = na_values.split(',')
 
         read_csv = partial(
             pd.read_csv,
@@ -1150,8 +1188,7 @@ class Dataset():
             keep_default_na=keep_default_na)
 
         if os.path.isdir(source_path):
-            regex_fname = kwargs.get('regex_filename')
-            csvs = seek_files(source_path, seek_name=regex_fname, seek_extension=[".csv"])
+            csvs = seek_files(source_path, seek_name=regex_filename, seek_extension=[".csv"])
             assert len(csvs) > 0, f"Folder {source_path} does not contain valid csv files."
 
             data = pd.DataFrame()
@@ -1170,8 +1207,7 @@ class Dataset():
                                    source_path: str,
                                    extensions: List,
                                    use_labels: bool = True,
-                                   lower_case_exts: bool = True,
-                                   **_) -> pd.DataFrame:
+                                   lower_case_exts: bool = True) -> pd.DataFrame:
         """_summary_
 
         Parameters
@@ -1243,10 +1279,8 @@ class Dataset():
         for ds in datasets:
             if ds.is_empty:
                 continue
-            _metadata = ds.metadata
-            _annotations = ds.get_annotations()
-            annotations = pd.concat([annotations, _annotations], ignore_index=True)
-            metadata = pd.concat([metadata, _metadata], ignore_index=True)
+            annotations = pd.concat([annotations, ds.annotations], ignore_index=True)
+            metadata = pd.concat([metadata, ds.metadata], ignore_index=True)
             root_dirs |= {ds.root_dir}
 
         root_dirs = list(root_dirs)
@@ -1363,8 +1397,7 @@ class Dataset():
     def _set_abspaths_and_validate_filenames(self,
                                              root_dir: Path,
                                              not_exist_ok: bool = False,
-                                             validate_filenames: bool = True,
-                                             **_):
+                                             validate_filenames: bool = True):
         """Set the absolute paths and validate items
 
         Parameters
@@ -1381,8 +1414,6 @@ class Dataset():
         assert root_dir is not None or validate_filenames is False, "root_dir must be assigned"
         validate_filenames = validate_filenames and val_filenames_debug
 
-        self._set_root_dir(root_dir)
-
         if root_dir is not None or validate_filenames != False:
             items_to_abspaths = Manager().dict()
             invalid_items = Manager().list()
@@ -1390,7 +1421,8 @@ class Dataset():
                 func=get_abspath_and_validate_item,
                 elements=self.items,
                 item=lambda item: item,
-                root_dir=root_dir,
+                old_root_dir=self.root_dir,
+                new_root_dir=root_dir,
                 validate_filenames=validate_filenames,
                 not_exist_ok=not_exist_ok,
                 items_to_abspaths=items_to_abspaths,
@@ -1400,15 +1432,17 @@ class Dataset():
             n_invalid = len(invalid_items)
             if n_invalid > 0:
                 logger.info(f'{n_invalid} invalid items found that were ignored')
-                self.filter_by_column(
+                self.filter_by_field(
                     Fields.ITEM, values=list(invalid_items), mode='exclude', inplace=True)
+
+        self._set_root_dir(root_dir)
 
         n_items = len(self.metadata)
         logger.debug(f'{n_items} {"" if validate_filenames else "not"} validated items found')
 
     @classmethod
-    def _add_media_id_field_to_dataframe(cls, dataframe: pd.DataFrame):
-        """Assigns the field `Fields.MEDIA_ID` in `dataframe` from the information contained
+    def _add_file_id_field_to_dataframe(cls, dataframe: pd.DataFrame):
+        """Assigns the field `Fields.FILE_ID` in `dataframe` from the information contained
         in the field `Fields.ITEM`
 
         Parameters
@@ -1418,11 +1452,11 @@ class Dataset():
         """
         stems = dataframe[Fields.ITEM].apply(lambda x: Path(x).stem)
         if stems.nunique() == dataframe[Fields.ITEM].nunique():
-            media_ids = stems
+            file_ids = stems
         else:
-            media_ids = dataframe[Fields.ITEM].apply(get_media_id_str_from_item)
+            file_ids = dataframe[Fields.ITEM].apply(get_file_id_str_from_item)
 
-        dataframe[cls.MetadataFields.MEDIA_ID] = media_ids
+        dataframe[cls.MetadataFields.FILE_ID] = file_ids
 
         return dataframe
 
@@ -1448,7 +1482,7 @@ class Dataset():
 
     #       region COLUMNS INFORMATION
     def _get_categories(self, sort_by_name: bool = True) -> list:
-        """Get the list of distinct values in the 'label' column of the dataset.
+        """Get the list of distinct values in the 'label' field of the dataset.
         This method could be used to construct the labelmap of the dataset in case it did not be
         provided in the constructor.
         The list of categories could be ordered and/or lowered.
@@ -1542,7 +1576,7 @@ class Dataset():
     def _verify_integrity_annotations(self, annotations: pd.DataFrame):
         assert isinstance(annotations, pd.DataFrame), f"Annotations data must be a pd.DataFrame"
 
-        assert_msg = f"Annotations data must contain the column {Fields.ITEM}"
+        assert_msg = f"annotations data must contain the column {Fields.ITEM}"
         assert Fields.ITEM in annotations.columns, assert_msg
 
         if self._key_field_annotations in annotations.columns:
@@ -1555,8 +1589,8 @@ class Dataset():
     def _verify_integrity_metadata(self, metadata: pd.DataFrame):
         assert isinstance(metadata, pd.DataFrame), "Media data must be a pd.DataFrame"
 
-        cnd = self.MetadataFields.MEDIA_ID in metadata.columns and Fields.ITEM in metadata.columns
-        msg = f"Metadata must contain the fields {self.MetadataFields.MEDIA_ID} and {Fields.ITEM}"
+        cnd = self.MetadataFields.FILE_ID in metadata.columns and Fields.ITEM in metadata.columns
+        msg = f"Metadata must contain the fields {self.MetadataFields.FILE_ID} and {Fields.ITEM}"
         assert cnd, msg
 
     #     endregion
@@ -1567,7 +1601,7 @@ class Dataset():
                   dest_path: str,
                   metadata: pd.DataFrame,
                   set_filename_with_id_and_ext: str,
-                  **kwargs):
+                  media_base_url: str = None):
         """Function that downloads media from the collection
 
         Parameters
@@ -1584,7 +1618,6 @@ class Dataset():
             * media_base_url : str
                 URL where the media are located
         """
-        media_base_url = kwargs.get('media_base_url')
         cond = media_base_url is not None
         assert cond, f"In order to download media you must assign media_base_url parameter"
         os.makedirs(dest_path, exist_ok=True)
@@ -1593,7 +1626,7 @@ class Dataset():
             fname = cls._get_filename(record, set_filename_with_id_and_ext)
             return os.path.join(dest_path, fname)
 
-        records = metadata[[cls.MetadataFields.MEDIA_ID, Fields.FILE_NAME]].to_dict('records')
+        records = metadata[[cls.MetadataFields.FILE_ID, Fields.FILE_NAME]].to_dict('records')
 
         logger.info(f"Downloading {len(records)} media...")
 
@@ -1606,32 +1639,24 @@ class Dataset():
 
     def _apply_filters_and_mappings(self,
                                     categories: Union[List[str], str] = None,
-                                    exclude_cats: Union[List[str], str] = None,
+                                    exclude_categories: Union[List[str], str] = None,
                                     min_score: float = None,
                                     max_score: float = None,
-                                    mapping_classes: dict = None,
-                                    mapping_classes_from_col: str = None,
-                                    mapping_classes_to_col: str = None,
-                                    mapping_classes_filter_expr: Callable = None,
-                                    round_score_digits: int = None,
-                                    **_):
-        if mapping_classes is not None:
-            cat_mappings = get_mapping_classes(
-                mapping_classes,
-                from_col=mapping_classes_from_col,
-                to_col=mapping_classes_to_col,
-                filter_expr=mapping_classes_filter_expr)
+                                    category_mapping: dict = None,
+                                    round_score_digits: int = None):
+        if category_mapping is not None:
+            cat_mappings = fix_category_mapping(category_mapping)
             self[Fields.LABEL] = lambda record: map_category(record[Fields.LABEL], cat_mappings)
+        if categories is not None:
+            self.filter_by_categories(categories, mode='include', inplace=True)
+        if exclude_categories is not None:
+            self.filter_by_categories(exclude_categories, mode='exclude', inplace=True)
+        if min_score is not None or max_score is not None:
+            self.filter_by_score(min_score=min_score, max_score=max_score, inplace=True)
         if round_score_digits is not None and Fields.SCORE in self.fields:
             annotations[Fields.SCORE] = (
                 annotations[Fields.SCORE].apply(lambda x: round(x, round_score_digits)))
             self[Fields.SCORE] = lambda record: round(record[Fields.SCORE], round_score_digits)
-        if categories is not None:
-            self.filter_by_categories(categories, mode='include', inplace=True)
-        if exclude_cats is not None:
-            self.filter_by_categories(exclude_cats, mode='exclude', inplace=True)
-        if min_score is not None or max_score is not None:
-            self.filter_by_score(min_score=min_score, max_score=max_score, inplace=True)
 
     @classmethod
     def _get_filename(cls,
@@ -1655,11 +1680,11 @@ class Dataset():
             ext = set_filename_with_id_and_extension
             if ext.startswith('.'):
                 ext = ext[1:]
-            fname = f'{record[cls.MetadataFields.MEDIA_ID]}.{ext}'
+            fname = f'{record[cls.MetadataFields.FILE_ID]}.{ext}'
         elif 'file_name' in record:
             fname = record[Fields.FILE_NAME]
         else:
-            fname = f'{record[cls.MetadataFields.MEDIA_ID]}{cls.DEFAULT_EXT}'
+            fname = f'{record[cls.MetadataFields.FILE_ID]}{cls.DEFAULT_EXT}'
         return fname.replace('\\', '/')
 
     def _format_item_for_storage(self, item):
@@ -1672,12 +1697,12 @@ class Dataset():
     #     region BUILD AND UPDATE
 
     @classmethod
-    def _fit_dataframe(cls, dataframe: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _fit_dataframe(cls, dataframe: pd.DataFrame, mapping_fields: dict = None) -> pd.DataFrame:
         dataframe = dataframe.dropna(how='all', axis=1).fillna('')
-        if kwargs.get('mapping_fields') is not None:
-            dataframe = dataframe.rename(columns=kwargs['mapping_fields'])
-        if not cls.MetadataFields.MEDIA_ID in dataframe.columns:
-            dataframe = cls._add_media_id_field_to_dataframe(dataframe)
+        if mapping_fields is not None:
+            dataframe = dataframe.rename(columns=mapping_fields)
+        if not cls.MetadataFields.FILE_ID in dataframe.columns:
+            dataframe = cls._add_file_id_field_to_dataframe(dataframe)
 
         return dataframe
 
@@ -1685,6 +1710,9 @@ class Dataset():
                          annotations: pd.DataFrame,
                          verify_integrity: bool = True,
                          field_modified: Optional[str] = None) -> pd.DataFrame:
+        if len(annotations) == 0:
+            return annotations
+
         if verify_integrity:
             self._verify_integrity_annotations(annotations)
         if (Fields.LABEL in annotations.columns
@@ -1702,6 +1730,9 @@ class Dataset():
                       metadata: pd.DataFrame,
                       verify_integrity: bool = True,
                       field_modified: Optional[str] = None) -> pd.DataFrame:
+        if len(metadata) == 0:
+            return metadata
+
         if verify_integrity:
             self._verify_integrity_metadata(metadata)
         metadata = metadata.drop_duplicates(subset=self._key_field_metadata).reset_index(drop=True)
@@ -1716,8 +1747,10 @@ class Dataset():
     @classmethod
     def _extract_annotations_from_dataframe(cls,
                                             dataframe: pd.DataFrame,
-                                            accept_all_fields: bool = False,
-                                            **_) -> pd.DataFrame:
+                                            accept_all_fields: bool = False) -> pd.DataFrame:
+        if len(dataframe) == 0:
+            return dataframe
+
         dataframe_fields = set(dataframe.columns.values)
         if accept_all_fields:
             common_fld = cls._get_common_field_anns_meta()
@@ -1731,6 +1764,9 @@ class Dataset():
 
     @classmethod
     def _extract_metadata_from_dataframe(cls, dataframe: pd.DataFrame) -> pd.DataFrame:
+        if len(dataframe) == 0:
+            return dataframe
+
         dataframe_fields = set(dataframe.columns.values)
         metadata_default_fields = set(get_default_fields(cls.MetadataFields))
         metadata_fields = metadata_default_fields & dataframe_fields
