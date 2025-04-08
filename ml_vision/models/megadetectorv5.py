@@ -44,78 +44,17 @@ class MegadetectorV5(Model):
     VEHICLE: Final = 'vehicle'
     EMPTY: Final = 'empty'
 
+    CLASS_NAMES = {
+        0: "animal",
+        1: "person",
+        2: "vehicle"
+    }
+
     def __init__(self,
                  version,
                  detection_model):
         self.version = version
         self.detection_model = detection_model
-
-    # TODO: Change returned type
-    # @classmethod
-    # def load_model(cls,
-    #                source_path: str = None,
-    #                version: Literal['a', 'b'] = 'a') -> MegadetectorV5:
-    #     if source_path is None or not os.path.isfile(source_path):
-    #         model_url = cls.urls[version]
-    #         model_path = download_file(model_url, get_temp_folder())
-    #         if source_path is None:
-    #             source_path = model_path
-    #         else:
-    #             os.makedirs(os.path.dirname(source_path), exist_ok=True)
-    #             move(model_path, source_path)
-    #             model_path = source_path
-    #     else:
-    #         model_path = source_path
-
-    #     instance = cls(version, model_path)
-    #     return instance
-
-    # def inference(self, dataset: ImageDataset, threshold: float = 0.01) -> str:
-
-    #     dataset_items = dataset.items
-    #     imgs_json = os.path.join(get_temp_folder(), f"{get_random_id()}-imgs.json")
-    #     dets_json = os.path.join(get_temp_folder(), f"{get_random_id()}-dets.json")
-
-    #     with open(imgs_json, 'w') as outfile:
-    #         json.dump(dataset_items, outfile)
-
-    #     try:
-    #         MEGADETECTOR_EXEC = os.environ['MEGADETECTOR_EXEC']
-    #     except Exception:
-    #         raise Exception(
-    #             f"You must assign the environment variable MEGADETECTOR_EXEC with the path of the "
-    #             f"detection/run_detector_batch.py script from the CameraTraps repository.")
-
-    #     PYTHON_EXEC = os.environ.get('PYTHON_EXEC', 'python')
-    #     try:
-    #         retcode = subprocess.call([PYTHON_EXEC, '--version'],
-    #                                   stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-    #         assert retcode == 0, f'Invalid call to {PYTHON_EXEC}'
-    #     except:
-    #         raise Exception(f"You must export the PYTHON_EXEC environment variable with the "
-    #                         f"python executable on your terminal. "
-    #                         f"E.g. 'export PYTHON_EXEC=python'")
-
-    #     assert os.path.isfile(self.model_path), (f"Invalid path for Megadetector model: "
-    #                                              f"{self.model_path}")
-
-    #     cmd = [PYTHON_EXEC, MEGADETECTOR_EXEC,
-    #            self.model_path,                     # --detector_file
-    #            imgs_json,                           # --image_file
-    #            dets_json,                           # --output_file
-    #            '--quiet',
-    #            '--threshold', f'{threshold}'
-    #            ]
-    #     logger.debug(f"Running Megadetector with the command: {' '.join(cmd)}")
-
-    #     retcode = subprocess.call(cmd)
-
-    #     if retcode != 0:
-    #         raise Exception(f"Megadetector executed and returned status code: {retcode}")
-
-    #     os.remove(imgs_json)
-
-    #     return dets_json
 
     @classmethod
     def load_model(cls, version="a") -> MegadetectorV5:
@@ -330,6 +269,8 @@ class MegadetectorV5Video(MegadetectorV5):
                 freq_video_sampling: int = 5,
                 frames_folder: str = None,
                 delete_frames_folder_on_finish: bool = True) -> VideoDataset:
+        if dataset.is_empty:
+            return VideoDataset(annotations=None, metadata=None)
 
         frames_ds = VideoDataset.create_frames_dataset(
             dataset, frames_folder, freq_sampling=freq_video_sampling, add_new_file_id=False)

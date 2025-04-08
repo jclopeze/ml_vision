@@ -254,6 +254,9 @@ class MegadetectorV6Video(MegadetectorV6):
                 frames_folder: str = None,
                 delete_frames_folder_on_finish: bool = True
                 ) -> VideoDataset:
+        if dataset.is_empty:
+            return VideoDataset(annotations=None, metadata=None)
+
         frames_ds = VideoDataset.create_frames_dataset(
             dataset, frames_folder, freq_sampling=freq_video_sampling, add_new_file_id=False)
 
