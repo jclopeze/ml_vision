@@ -200,8 +200,8 @@ class Dataset():
 
         self._verify_annotations_and_metadata_consistency()
         self._apply_filters_and_mappings(**kwargs)
-        self._set_abspaths_and_validate_filenames(
-            root_dir, validate_filenames=validate_filenames, not_exist_ok=not_exist_ok)
+        self.set_root_dir(
+            root_dir, not_exist_ok=not_exist_ok, validate_filenames=validate_filenames)
         self._split(use_partitions)
 
     # endregion
@@ -402,8 +402,11 @@ class Dataset():
         datasets = []
         for dataset in args:
             assert isinstance(dataset, Dataset), f"{type(dataset)} is not a Dataset instance."
-            _dataset = cls.cast(dataset)
-            datasets.append(_dataset)
+            if not dataset.is_empty:
+                datasets.append(cls.cast(dataset))
+
+        if not datasets:
+            return cls(annotations=None, metadata=None)
 
         annotations, metadata, root_dir = cls._get_concat_data_from_datasets(datasets)
 
@@ -1106,8 +1109,9 @@ class Dataset():
 
         return instance
 
-    def take(self, n: int) -> Dataset:
-        return self.sample(n=n, use_labels=False, use_partitions=False, inplace=False)
+    def take(self, n: int, random_state: int = None) -> Dataset:
+        return self.sample(
+            n=n, use_labels=False, use_partitions=False, random_state=random_state, inplace=False)
 
     #     endregion
 
@@ -1273,22 +1277,23 @@ class Dataset():
         Tuple[pd.DataFrame, pd.DataFrame, str]
             _description_
         """
-        annotations = pd.DataFrame()
-        metadata = pd.DataFrame()
+        dataframe = pd.DataFrame()
         root_dirs = set()
         for ds in datasets:
             if ds.is_empty:
                 continue
-            annotations = pd.concat([annotations, ds.annotations], ignore_index=True)
-            metadata = pd.concat([metadata, ds.metadata], ignore_index=True)
+            dataframe = pd.concat([dataframe, ds.df], ignore_index=True)
             root_dirs |= {ds.root_dir}
+
+        annotations = cls._extract_annotations_from_dataframe(dataframe, accept_all_fields=True)
+        metadata = cls._extract_metadata_from_dataframe(dataframe)
 
         root_dirs = list(root_dirs)
         if len(root_dirs) == 1 and root_dirs[0] != '':
-            # The media dirs are all the same, so we can pick it for the new dataset
+            # The root dirs are all the same, so we can pick it for the new dataset
             root_dir = root_dirs[0]
         else:
-            # The media dirs are different, so we can't pick any for the new dataset
+            # The root dirs are different, so we can't pick any for the new dataset
             root_dir = None
 
         return annotations, metadata, root_dir
@@ -1394,10 +1399,10 @@ class Dataset():
     def _set_root_dir(self, root_dir):
         self._root_dir = root_dir
 
-    def _set_abspaths_and_validate_filenames(self,
-                                             root_dir: Path,
-                                             not_exist_ok: bool = False,
-                                             validate_filenames: bool = True):
+    def set_root_dir(self,
+                     root_dir: Path,
+                     not_exist_ok: bool = False,
+                     validate_filenames: bool = True):
         """Set the absolute paths and validate items
 
         Parameters

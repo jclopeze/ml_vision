@@ -369,7 +369,7 @@ class LILADataset(ImageDataset):
 
         if root_dir_prov is not None:
             instance.set_items_after_downloading()
-            instance._set_abspaths_and_validate_filenames(root_dir_prov, not_exist_ok=True)
+            instance.set_root_dir(root_dir_prov, not_exist_ok=True)
 
         return instance
 

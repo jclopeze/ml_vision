@@ -363,10 +363,6 @@ class VisionDataset(Dataset):
                              prefix_field: str = None,
                              frames_folder: str = None,
                              delete_frames_folder_on_finish: bool = True) -> VisionDataset:
-        if self.is_empty:
-            logger.debug("No data to create a cropped dataset")
-            return VisionDataset(annotations=None, metadata=None)
-
         imgs_ds = self.images_ds
         vids_ds = self.videos_ds
 

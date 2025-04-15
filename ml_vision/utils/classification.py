@@ -1,112 +1,48 @@
 from collections import defaultdict
-from multiprocessing import Manager
-from typing import Union
-from itertools import groupby
 
 import numpy as np
 import pandas as pd
+from typing import Final
 
 from ml_base.utils.logger import get_logger
-from ml_base.utils.misc import parallel_exec
-from ml_vision.datasets import ImageDataset
-from ml_vision.datasets import VideoDataset
+from ml_vision.utils.vision import Fields as VFields
 
 logger = get_logger(__name__)
 
-# region Image level classification
+
+class MD_LABELS():
+    ANIMAL: Final = 'animal'
+    PERSON: Final = 'person'
+    VEHICLE: Final = 'vehicle'
+    EMPTY: Final = 'empty'
 
 
-# endregion
+def wildlife_filtering_using_detections(dets_df: pd.DataFrame,
+                                        item: str,
+                                        threshold: float,
+                                        results_per_item: dict):
+    dets_item_thres = dets_df[(dets_df[VFields.ITEM] == item) &
+                              (dets_df[VFields.SCORE] >= threshold)]
 
-# region Sequence level classification
-def _get_seq_level_label_and_score(preds_df: pd.DataFrame,
-                                   seq_id: str,
-                                   pred_method: str,
-                                   seq_id_to_label_and_score: dict):
-    preds_seq = preds_df[preds_df['seq_id'] == seq_id]
-    if pred_method == 'highest_pred':
-        highest_pred = (
-            preds_seq.sort_values(by='score', ascending=False)
-            .iloc[0]
-        )
-        label = highest_pred['label']
-        max_score = highest_pred['score']
-    elif pred_method == 'preds_mode':
-        label_modes = preds_seq['label'].mode()
-        if len(label_modes) > 1:
-            highest_mode = (
-                preds_seq[preds_seq["label"].isin(label_modes.values)]
-                .sort_values(by='score', ascending=False)
-                .iloc[0]
-            )
-            label = highest_mode['label']
-            max_score = highest_mode['score']
+    if len(dets_item_thres) > 0:
+        animal_dets = dets_item_thres[dets_item_thres[VFields.LABEL] == MD_LABELS.ANIMAL]
+        if len(animal_dets) > 0:
+            label = MD_LABELS.ANIMAL
+            score = animal_dets[VFields.SCORE].max()
         else:
-            label = label_modes.iloc[0]
-            max_score = preds_seq[preds_seq.label == label].score.max()
+            label = MD_LABELS.PERSON
+            score = dets_item_thres[VFields.SCORE].max()
     else:
-        raise ValueError(f"Invalid pred_method: {pred_method}")
-
-    seq_id_to_label_and_score[seq_id] = {
+        label = MD_LABELS.EMPTY
+        dets_item_all = dets_df[dets_df[VFields.ITEM] == item]
+        if len(dets_item_all) > 0:
+            score = 1 - dets_item_all[VFields.SCORE].max()
+        else:
+            score = 1.
+    results_per_item[item] = {
         'label': label,
-        'score': max_score
+        'score': score
     }
-
-
-def get_seq_level_pred_dataset(dataset_true: ImageDataset,
-                               dataset_pred: ImageDataset,
-                               pred_method: str = 'highest_pred',
-                               **kwargs) -> ImageDataset:
-    true_df = dataset_true.as_dataframe()
-    preds_df = dataset_pred.as_dataframe()
-
-    seq_id_to_label_and_score = Manager().dict()
-    seqs_ids = true_df['seq_id'].unique()
-    assert '' not in seqs_ids, "Empty sequences are not allowed to generate predictions"
-
-    parallel_exec(
-        func=_get_seq_level_label_and_score,
-        elements=seqs_ids,
-        preds_df=preds_df,
-        seq_id=lambda seq_id: seq_id,
-        pred_method=pred_method,
-        seq_id_to_label_and_score=seq_id_to_label_and_score)
-
-    preds_ds = dataset_true.copy()
-    preds_ds['label'] = lambda rec: seq_id_to_label_and_score[rec['seq_id']]['label']
-    preds_ds['score'] = lambda rec: seq_id_to_label_and_score[rec['seq_id']]['score']
-
-    annotations = preds_ds.annotations
-    metadata = preds_ds.metadata
-    root_dir = preds_ds.root_dir
-
-    preds_ds = ImageDataset(annotations, metadata, root_dir, **kwargs)
-    return preds_ds
-# endregion
-
-
-def get_media_level_pred_dataset(dataset_true: Union[ImageDataset, VideoDataset],
-                                 dataset_pred: Union[ImageDataset, VideoDataset],
-                                 pred_method: str = 'highest_pred',
-                                 empty_label: str = 'empty',
-                                 det_labels_map: dict = None,
-                                 score_empty_label: float = 0.,
-                                 seq_level_for_images: bool = False,
-                                 **kwargs) -> Union[ImageDataset, VideoDataset]:
-    if isinstance(dataset_true, ImageDataset):
-        if seq_level_for_images:
-            media_level_dataset_pred = get_seq_level_pred_dataset(
-                dataset_true=dataset_true, dataset_pred=dataset_pred, pred_method=pred_method,
-                empty_label=empty_label, det_labels_map=det_labels_map,
-                score_empty_label=score_empty_label, **kwargs)
-        else:
-            pass
-    elif isinstance(dataset_true, VideoDataset):
-        pass
-    else:
-        raise Exception('Invalid type of dataset_true')
-
-    return media_level_dataset_pred
 
 
 def set_label_and_score_for_item_in_ensemble(item: str,

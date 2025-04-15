@@ -7,6 +7,7 @@ from multiprocessing import Manager
 import os
 import pandas as pd
 import subprocess
+from typing import Final
 
 from ml_base.model import Model
 from ml_base.utils.misc import get_temp_folder
@@ -26,70 +27,83 @@ logger = get_logger(__name__)
 
 
 class SpeciesNet(Model):
-    def __init__(self,
-                 script_path,
-                 version,
-                 ):
-        self.version = version
+
+    DEFAULT_SCRIPT: Final = 'speciesnet.scripts.run_model'
+
+    def __init__(self, script_path=None):
         self.script_path = script_path
 
     @classmethod
-    def load_model(cls,
-                   script_path,
-                   version=None,) -> SpeciesNet:
-        return SpeciesNet(script_path=script_path, version=version)
+    def load_model(cls, script_path=None) -> SpeciesNet:
+        return SpeciesNet(script_path=script_path)
 
     def inference(self,
                   dataset: ImageDataset,
-                  detections: ImageDataset,
                   country: str = None) -> str:
 
-        dets_json = os.path.join(get_temp_folder(), f"{get_random_id()}-dets.json")
-        classifs_json = os.path.join(get_temp_folder(), f"{get_random_id()}-classifs.json")
         ensemble_json = os.path.join(get_temp_folder(), f"{get_random_id()}-ensemble.json")
-        detections = ImageDatasetSpeciesNet.cast(detections)
-        detections.to_json(dets_json)
 
         PYTHON_EXEC = os.environ.get('PYTHON_EXEC', 'python')
+        script_path = self.script_path or f'-m {self.DEFAULT_SCRIPT}'
 
-        # Execute the classifier
-        cmd = [PYTHON_EXEC, self.script_path,
-               '--classifier_only',
-               '--folders', dataset.root_dir,
-               '--predictions_json', classifs_json,
-               '--detections_json',  dets_json,
-               ]
-        if country is not None:
-            cmd += ['--country', f'{country}']
-        logger.debug(f"Running SpeciesNet classifier with the command: {' '.join(cmd)}")
+        if 'bbox' in dataset.fields:
+            classifs_json = os.path.join(get_temp_folder(), f"{get_random_id()}-classifs.json")
+            dets_json = os.path.join(get_temp_folder(), f"{get_random_id()}-dets.json")
+            dataset = ImageDatasetSpeciesNet.cast(dataset)
+            dataset.to_json(dets_json)
 
-        retcode = subprocess.call(cmd)
+            # region Execute the classifier
+            cmd = [PYTHON_EXEC, script_path,
+                   '--classifier_only',
+                   '--folders', dataset.root_dir,
+                   '--predictions_json', classifs_json,
+                   '--detections_json',  dets_json,
+                   ]
+            if country is not None:
+                cmd += ['--country', f'{country}']
+            logger.debug(f"Running SpeciesNet classifier with the command: {' '.join(cmd)}")
 
-        if retcode != 0:
-            raise Exception(f"SpeciesNet executed and returned status code: {retcode}")
+            retcode = subprocess.call(cmd)
 
-        # Execute the ensemble
-        cmd = [PYTHON_EXEC, self.script_path,
-               '--ensemble_only',
-               '--folders', dataset.root_dir,
-               '--predictions_json', ensemble_json,
-               '--detections_json',  dets_json,
-               '--classifications_json', classifs_json
-               ]
-        if country is not None:
-            cmd += ['--country', f'{country}']
-        logger.debug(f"Running SpeciesNet ensemble with the command: {' '.join(cmd)}")
+            if retcode != 0:
+                raise Exception(f"SpeciesNet executed and returned status code: {retcode}")
+            # endregion
 
-        retcode = subprocess.call(cmd)
+            # region Execute the ensemble
+            cmd = [PYTHON_EXEC, script_path,
+                   '--ensemble_only',
+                   '--folders', dataset.root_dir,
+                   '--predictions_json', ensemble_json,
+                   '--detections_json',  dets_json,
+                   '--classifications_json', classifs_json
+                   ]
+            if country is not None:
+                cmd += ['--country', f'{country}']
+            logger.debug(f"Running SpeciesNet ensemble with the command: {' '.join(cmd)}")
 
-        if retcode != 0:
-            raise Exception(f"SpeciesNet executed and returned status code: {retcode}")
+            retcode = subprocess.call(cmd)
+
+            if retcode != 0:
+                raise Exception(f"SpeciesNet executed and returned status code: {retcode}")
+            # endregion
+        else:
+            cmd = [PYTHON_EXEC, script_path,
+                   '--folders', dataset.root_dir,
+                   '--predictions_json', ensemble_json,
+                   ]
+            if country is not None:
+                cmd += ['--country', f'{country}']
+            logger.debug(f"Running SpeciesNet with the command: {' '.join(cmd)}")
+
+            retcode = subprocess.call(cmd)
+
+            if retcode != 0:
+                raise Exception(f"SpeciesNet executed and returned status code: {retcode}")
 
         return ensemble_json
 
     def predict(self,
                 dataset: VisionDataset,
-                detections: VisionDataset,
                 country: str = None,
                 threshold: float = 0.01,
                 frames_folder: str = None) -> VisionDataset:
@@ -108,18 +122,13 @@ class SpeciesNet(Model):
             Image dataset with Megadetector predictions
         """
 
-        if dataset.is_empty:
-            logger.debug("No data to detect")
-            return dataset
-
         classifs_imgs_ds = SpeciesNetImage.predict(model=self,
                                                    dataset=dataset.images_ds,
-                                                   detections=detections.images_ds,
                                                    country=country,
                                                    threshold=threshold)
+
         classifs_vids_ds = SpeciesNetVideo.predict(model=self,
                                                    dataset=dataset.videos_ds,
-                                                   detections=detections.videos_ds,
                                                    country=country,
                                                    threshold=threshold,
                                                    frames_folder=frames_folder)
@@ -128,26 +137,24 @@ class SpeciesNet(Model):
 
     def classify(self,
                  dataset: VisionDataset,
-                 detections: VisionDataset = None,
                  country: str = None,
                  threshold: float = 0.01,
                  frames_folder: str = None):
 
         classifs_ds = self.predict(dataset=dataset,
-                                   detections=detections,
                                    country=country,
                                    threshold=threshold,
                                    frames_folder=frames_folder)
 
-        classif_ds = self.classify_dataset_using_seqs(dataset=dataset, classifications=classifs_ds)
+        classif_ds = self.taxonomic_classification(dataset=dataset, classifications=classifs_ds)
 
         return classif_ds
 
     @classmethod
-    def _get_seq_level_classif(cls,
-                               classifs_df: pd.DataFrame,
-                               seq_id: str,
-                               item_to_label_score: dict):
+    def _taxa_classif_per_seq_id(cls,
+                                 classifs_df: pd.DataFrame,
+                                 seq_id: str,
+                                 results_per_seq_id: dict):
         items_seq = classifs_df[classifs_df[VFields.SEQ_ID] == seq_id]
         taxa_levels = ['species', 'genus', 'family', 'order', 'class', 'kingdom', 'empty']
 
@@ -172,29 +179,29 @@ class SpeciesNet(Model):
                 score = items_taxa_lvl[items_taxa_lvl.label == label].score.max()
             break
 
-        item_to_label_score[seq_id] = {
+        results_per_seq_id[seq_id] = {
             'label': label,
             'taxonomy_level': taxonomy_level,
             'score': score
         }
 
     @classmethod
-    def classify_dataset_using_seqs(cls,
-                                    dataset: VisionDataset,
-                                    classifications: VisionDataset) -> VisionDataset:
+    def taxonomic_classification(cls,
+                                 dataset: VisionDataset,
+                                 classifications: VisionDataset) -> VisionDataset:
 
-        item_to_label_score = Manager().dict()
+        results_per_seq_id = Manager().dict()
         parallel_exec(
-            func=cls._get_seq_level_classif,
+            func=cls._taxa_classif_per_seq_id,
             elements=dataset['seq_id'].unique(),
             classifs_df=classifications.df,
             seq_id=lambda seq_id: seq_id,
-            item_to_label_score=item_to_label_score)
+            results_per_seq_id=results_per_seq_id)
 
         classif_ds = type(dataset).cast(dataset)
-        classif_ds[VFields.LABEL] = lambda x: item_to_label_score[x[VFields.SEQ_ID]]['label']
-        classif_ds['taxonomy_level'] = lambda x: item_to_label_score[x[VFields.SEQ_ID]]['taxonomy_level']
-        classif_ds[VFields.SCORE] = lambda x: item_to_label_score[x[VFields.SEQ_ID]]['score']
+        classif_ds[VFields.LABEL] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['label']
+        classif_ds['taxonomy_level'] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['taxonomy_level']
+        classif_ds[VFields.SCORE] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['score']
 
         return classif_ds
 
@@ -211,7 +218,6 @@ class SpeciesNetImage(SpeciesNet):
     @staticmethod
     def predict(model: SpeciesNet,
                 dataset: ImageDataset,
-                detections: VisionDataset,
                 country: str = None,
                 threshold: float = 0.01,
                 move_files_to_temp_folder=True) -> ImageDataset:
@@ -232,24 +238,21 @@ class SpeciesNetImage(SpeciesNet):
         if dataset.is_empty:
             return ImageDatasetSpeciesNet(annotations=None, metadata=None)
 
-        _dataset = dataset.copy()
-        _detections = detections.copy()
+        ds = dataset.copy()
         if move_files_to_temp_folder:
             # We need to be sure that only the files of the dataset are stored in root_dir
             temp_folder = os.path.join(get_temp_folder(), f"images-{get_random_id()}")
-            _dataset.to_folder(
+            ds.to_folder(
                 temp_folder,
                 use_labels=False,
-                move_files=False,                                                                   #######
+                move_files=True,
                 preserve_directory_hierarchy=True,
                 update_dataset_filepaths=True)
-            _detections._set_abspaths_and_validate_filenames(temp_folder, validate_filenames=True)
 
-        classifs_json = model.inference(_dataset, detections=_detections, country=country)
-
+        classifs_json = model.inference(ds, country=country)
         classifs_ds = ImageDatasetSpeciesNet.from_json(classifs_json,
-                                                       metadata=_dataset.metadata.copy(),
-                                                       root_dir=_dataset.root_dir,
+                                                       metadata=ds.metadata.copy(),
+                                                       root_dir=ds.root_dir,
                                                        min_score=threshold)
 
         if move_files_to_temp_folder:
@@ -268,28 +271,35 @@ class SpeciesNetVideo(SpeciesNet):
     @staticmethod
     def predict(model,
                 dataset: VideoDataset,
-                detections: VisionDataset,
                 country: str = None,
                 threshold: float = 0.01,
                 frames_folder: str = None,
+                freq_sampling: int = 5,
                 delete_frames_folder_on_finish: bool = True,
                 batch_size: int = 500) -> VideoDataset:
         if dataset.is_empty:
             return ImageDatasetSpeciesNet(annotations=None, metadata=None)
 
-        frame_numbers = get_frame_numbers_from_vids(detections.df)
+        if 'bbox' in dataset.fields and VFields.VID_FRAME_NUM in dataset.fields:
+            frame_numbers = get_frame_numbers_from_vids(dataset.df)
+            freq_sampl = None
+        else:
+            frame_numbers = None
+            freq_sampl = freq_sampling
 
         dets_vids_dss = []
         for ds in dataset.batch_gen(batch_size):
             frames_ds = VideoDataset.create_frames_dataset(
-                ds, frames_folder, frame_numbers=frame_numbers, add_new_file_id=False)
+                ds, frames_folder, freq_sampling=freq_sampl, frame_numbers=frame_numbers,
+                add_new_file_id=False)
             frames_ds[VFields.LABEL] = 'animal'
-            frames_with_bboxes_ds = frames_ds.create_object_level_dataset_using_detections(
-                detections, fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
+
+            if 'bbox' in dataset.fields:
+                frames_ds = frames_ds.create_object_level_dataset_using_detections(
+                    dataset, fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
 
             dets_frames_ds = SpeciesNetImage.predict(model=model,
                                                      dataset=frames_ds,
-                                                     detections=frames_with_bboxes_ds,
                                                      country=country,
                                                      threshold=threshold,
                                                      move_files_to_temp_folder=False)
@@ -429,7 +439,7 @@ class ImageDatasetSpeciesNet(ImageDataset):
         prediction_list = prediction_str.split(';')
         if prediction_list[-1] == 'blank':
             return 'empty', 'empty'
-        if prediction_list[-1] ==  'no cv result':
+        if prediction_list[-1] == 'no cv result':
             return 'animalia', 'kingdom'
         if prediction_list[-2] != '':
             return (f'{prediction_list[-3]} {prediction_list[-2]}',

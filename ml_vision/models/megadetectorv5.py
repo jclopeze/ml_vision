@@ -7,14 +7,10 @@ import json
 from multiprocessing import Manager
 import os
 import pandas as pd
-from shutil import move
-import subprocess
-from typing import Union, Final, Literal, List, Tuple
+from typing import Union, Final, List, Tuple
 
 from ml_base.model import Model
 from ml_base.eval import Metric
-from ml_base.utils.misc import get_temp_folder
-from ml_base.utils.misc import download_file
 from ml_base.utils.misc import delete_dirs
 from ml_base.utils.misc import parallel_exec
 from ml_base.utils.logger import get_logger
@@ -24,6 +20,7 @@ from ml_base.utils.dataset import get_random_id
 from ml_vision.datasets import ImageDataset
 from ml_vision.datasets import VideoDataset
 from ml_vision.datasets import VisionDataset
+from ml_vision.utils.classification import wildlife_filtering_using_detections, MD_LABELS
 from ml_vision.utils.coords import CoordinatesType, CoordinatesFormat, CoordinatesDataType
 from ml_vision.utils.coords import transform_coordinates
 from ml_vision.utils.vision import VisionFields as VFields
@@ -39,15 +36,11 @@ class MegadetectorV5(Model):
         'a': 'https://github.com/microsoft/CameraTraps/releases/download/v5.0/md_v5a.0.0.pt',
         'b': 'https://github.com/microsoft/CameraTraps/releases/download/v5.0/md_v5b.0.0.pt'
     }
-    ANIMAL: Final = 'animal'
-    PERSON: Final = 'person'
-    VEHICLE: Final = 'vehicle'
-    EMPTY: Final = 'empty'
 
     CLASS_NAMES = {
-        0: "animal",
-        1: "person",
-        2: "vehicle"
+        0: MD_LABELS.ANIMAL,
+        1: MD_LABELS.PERSON,
+        2: MD_LABELS.VEHICLE
     }
 
     def __init__(self,
@@ -111,10 +104,6 @@ class MegadetectorV5(Model):
             Image dataset with Megadetector predictions
         """
 
-        if dataset.is_empty:
-            logger.debug("No data to detect")
-            return dataset
-
         dets_imgs_ds = MegadetectorV5Image.predict(model=self,
                                                    dataset=dataset.images_ds,
                                                    threshold=threshold)
@@ -172,55 +161,24 @@ class MegadetectorV5(Model):
         raise NotImplementedError
 
     @classmethod
-    def _get_media_level_label_and_score(cls,
-                                         dets_df: pd.DataFrame,
-                                         item: str,
-                                         threshold: float,
-                                         item_to_label_score: dict):
-        dets_item_thres = dets_df[(dets_df[VFields.ITEM] == item) &
-                                  (dets_df[VFields.SCORE] >= threshold)]
-
-        if len(dets_item_thres) > 0:
-            person_dets = dets_item_thres[dets_item_thres[VFields.LABEL] == cls.PERSON]
-            if len(person_dets) > 0:
-                label = cls.PERSON
-                score = person_dets[VFields.SCORE].max()
-            else:
-                label = cls.ANIMAL
-                score = dets_item_thres[VFields.SCORE].max()
-        else:
-            label = cls.EMPTY
-            dets_item_all = dets_df[dets_df[VFields.ITEM] == item]
-            if len(dets_item_all) > 0:
-                score = 1 - dets_item_all[VFields.SCORE].max()
-            else:
-                score = 1.
-        item_to_label_score[item] = {
-            'label': label,
-            'score': score
-        }
-
-    @classmethod
     def classify_dataset_using_detections(cls,
                                           dataset: VisionDataset,
                                           detections: VisionDataset,
                                           dets_threshold: float) -> VisionDataset:
-        dets_labels_mapping = {cls.VEHICLE: cls.PERSON, '*': '*'}
-        detections.map_categories(category_mapping=dets_labels_mapping, inplace=True)
 
-        item_to_label_score = Manager().dict()
+        results_per_item = Manager().dict()
         parallel_exec(
-            func=cls._get_media_level_label_and_score,
+            func=wildlife_filtering_using_detections,
             elements=dataset.items,
             dets_df=detections.df,
             item=lambda item: item,
             threshold=dets_threshold,
-            item_to_label_score=item_to_label_score)
+            results_per_item=results_per_item)
 
         # TODO: Check if it is needed to convert dataset to a media level dataset
         classif_ds = type(dataset)._copy_dataset(dataset)
-        classif_ds[VFields.LABEL] = lambda x: item_to_label_score[x[VFields.ITEM]]['label']
-        classif_ds[VFields.SCORE] = lambda x: item_to_label_score[x[VFields.ITEM]]['score']
+        classif_ds[VFields.LABEL] = lambda x: results_per_item[x[VFields.ITEM]]['label']
+        classif_ds[VFields.SCORE] = lambda x: results_per_item[x[VFields.ITEM]]['score']
 
         return classif_ds
 
@@ -250,9 +208,6 @@ class MegadetectorV5Image(MegadetectorV5):
 
         anns_dets_df = model.inference(dataset, threshold)
 
-        # dets_ds = ImageDatasetMD.from_json(dets_json,
-        #                                    metadata=dataset.metadata.copy(),
-        #                                    root_dir=dataset.root_dir)
         dets_ds = ImageDataset(annotations=anns_dets_df,
                                metadata=dataset.metadata.copy(),
                                root_dir=dataset.root_dir,
