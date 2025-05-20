@@ -79,7 +79,8 @@ class MegadetectorV6(Model):
                 dataset: VisionDataset,
                 threshold: float = 0.01,
                 freq_video_sampling: int = 5,
-                frames_folder: str = None) -> VisionDataset:
+                frames_folder: str = None,
+                delete_frames_folder_on_finish: bool = True) -> VisionDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -95,14 +96,17 @@ class MegadetectorV6(Model):
             Image dataset with Megadetector predictions
         """
 
-        dets_imgs_ds = MegadetectorV6Image.predict(model=self,
-                                                   dataset=dataset.images_ds,
-                                                   threshold=threshold)
-        dets_vids_ds = MegadetectorV6Video.predict(model=self,
-                                                   dataset=dataset.videos_ds,
-                                                   threshold=threshold,
-                                                   freq_video_sampling=freq_video_sampling,
-                                                   frames_folder=frames_folder)
+        dets_imgs_ds = MegadetectorV6Image.predict(
+            model=self,
+            dataset=dataset.images_ds,
+            threshold=threshold)
+        dets_vids_ds = MegadetectorV6Video.predict(
+            model=self,
+            dataset=dataset.videos_ds,
+            threshold=threshold,
+            freq_video_sampling=freq_video_sampling,
+            frames_folder=frames_folder,
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish)
 
         return type(dataset).from_datasets(dets_imgs_ds, dets_vids_ds)
 
@@ -112,11 +116,14 @@ class MegadetectorV6(Model):
                  freq_video_sampling: int = 5,
                  frames_folder: str = None,
                  return_detections: bool = False,
+                 delete_frames_folder_on_finish: bool = True
                  ) -> Union[VisionDataset, Tuple[VisionDataset, VisionDataset]]:
 
-        dets_ds = self.predict(dataset=dataset,
-                               freq_video_sampling=freq_video_sampling,
-                               frames_folder=frames_folder)
+        dets_ds = self.predict(
+            dataset=dataset,
+            freq_video_sampling=freq_video_sampling,
+            frames_folder=frames_folder,
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
