@@ -54,7 +54,7 @@ class MegadetectorV6(Model):
 
     def inference(self, dataset: ImageDataset, threshold: float = 0.01) -> pd.DataFrame:
         results_list = self.detection_model.batch_image_detection(
-            data_path=dataset.root_dir, batch_size=16, det_conf_thres=threshold)
+            dataset.root_dir, batch_size=16, det_conf_thres=threshold)
 
         data = defaultdict(list)
         for results in results_list:
