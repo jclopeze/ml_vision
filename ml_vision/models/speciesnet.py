@@ -220,7 +220,7 @@ class SpeciesNetImage(SpeciesNet):
                 dataset: ImageDataset,
                 country: str = None,
                 threshold: float = 0.01,
-                move_files_to_temp_folder=True) -> ImageDataset:
+                move_files_to_temp_folder: bool = True) -> ImageDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -276,7 +276,8 @@ class SpeciesNetVideo(SpeciesNet):
                 frames_folder: str = None,
                 freq_sampling: int = 5,
                 delete_frames_folder_on_finish: bool = True,
-                batch_size: int = 500) -> VideoDataset:
+                batch_size: int = 500,
+                move_files_to_temp_folder: bool = True) -> VideoDataset:
         if dataset.is_empty:
             return ImageDatasetSpeciesNet(annotations=None, metadata=None)
 
@@ -298,13 +299,16 @@ class SpeciesNetVideo(SpeciesNet):
                 frames_ds = frames_ds.create_object_level_dataset_using_detections(
                     dataset, fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
 
-            dets_frames_ds = SpeciesNetImage.predict(model=model,
-                                                     dataset=frames_ds,
-                                                     country=country,
-                                                     threshold=threshold,
-                                                     move_files_to_temp_folder=False)
+            dets_frames_ds = SpeciesNetImage.predict(
+                model=model,
+                dataset=frames_ds,
+                country=country,
+                threshold=threshold,
+                move_files_to_temp_folder=move_files_to_temp_folder)
 
-            mapper = frames_ds.df.set_index(VFields.ITEM)[VFields.VID_FRAME_NUM]
+            mapper = (
+                frames_ds.df.drop_duplicates(VFields.ITEM)
+                .set_index(VFields.ITEM)[VFields.VID_FRAME_NUM])
             dets_frames_ds[VFields.VID_FRAME_NUM] = lambda record: mapper.loc[record[VFields.ITEM]]
 
             _dets_vids_ds = ds.create_object_level_dataset_using_detections(
