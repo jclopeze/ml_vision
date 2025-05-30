@@ -232,7 +232,8 @@ class MegadetectorV5Video(MegadetectorV5):
 
         dets_frames_ds = MegadetectorV5Image.predict(model=model,
                                                      dataset=frames_ds,
-                                                     threshold=threshold)
+                                                     threshold=threshold,
+                                                     move_files_to_temp_folder=False)
 
         mapper = frames_ds.df.set_index(VFields.ITEM)[VFields.VID_FRAME_NUM]
         dets_frames_ds[VFields.VID_FRAME_NUM] = lambda record: mapper.loc[record[VFields.ITEM]]
