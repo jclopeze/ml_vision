@@ -314,6 +314,7 @@ class SpeciesNetVideo(SpeciesNet):
             _dets_vids_ds = ds.create_object_level_dataset_using_detections(
                 dets_frames_ds,
                 use_detections_labels=True,
+                fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM],
                 additional_fields_from_detections=['taxonomy_level'])
             dets_vids_dss.append(_dets_vids_ds)
 
@@ -328,7 +329,7 @@ class SpeciesNetVideo(SpeciesNet):
 
 
 class ImageDatasetSpeciesNet(ImageDataset):
-    taxa_levels = {
+    taxa_levels_by_pos = {
         -2: 'species',
         -3: 'genus',
         -4: 'family',
@@ -447,8 +448,8 @@ class ImageDatasetSpeciesNet(ImageDataset):
             return 'animalia', 'kingdom'
         if prediction_list[-2] != '':
             return (f'{prediction_list[-3]} {prediction_list[-2]}',
-                    ImageDatasetSpeciesNet.taxa_levels[-2])
+                    ImageDatasetSpeciesNet.taxa_levels_by_pos[-2])
         for i in range(-3, -7, -1):
             if prediction_list[i] != '':
-                return prediction_list[i], ImageDatasetSpeciesNet.taxa_levels[i]
+                return prediction_list[i], ImageDatasetSpeciesNet.taxa_levels_by_pos[i]
         return 'animalia', 'kingdom'

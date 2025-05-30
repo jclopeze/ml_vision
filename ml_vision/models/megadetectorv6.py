@@ -116,14 +116,22 @@ class MegadetectorV6(Model):
                  freq_video_sampling: int = 5,
                  frames_folder: str = None,
                  return_detections: bool = False,
-                 delete_frames_folder_on_finish: bool = True
+                 delete_frames_folder_on_finish: bool = True,
+                 dets_csv=None
                  ) -> Union[VisionDataset, Tuple[VisionDataset, VisionDataset]]:
 
-        dets_ds = self.predict(
-            dataset=dataset,
-            freq_video_sampling=freq_video_sampling,
-            frames_folder=frames_folder,
-            delete_frames_folder_on_finish=delete_frames_folder_on_finish)
+        if dets_csv is None:
+            dets_ds = self.predict(
+                dataset=dataset,
+                freq_video_sampling=freq_video_sampling,
+                frames_folder=frames_folder,
+                delete_frames_folder_on_finish=delete_frames_folder_on_finish)
+            temp_csv = os.path.join(get_temp_folder(), f"dets-{get_random_id()}.csv")
+            dets_ds.to_csv(temp_csv)
+            logger.info(f"Detections results were stored in {temp_csv}")
+        else:
+            dets_ds = type(dataset).from_csv(
+                dets_csv, root_dir=dataset.root_dir, validate_filenames=False)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
@@ -259,7 +267,8 @@ class MegadetectorV6Video(MegadetectorV6):
         dets_frames_ds[VFields.VID_FRAME_NUM] = lambda record: mapper.loc[record[VFields.ITEM]]
 
         dets_vids_ds = dataset.create_object_level_dataset_using_detections(
-            dets_frames_ds, use_detections_labels=True)
+            dets_frames_ds, use_detections_labels=True,
+            fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
 
         if delete_frames_folder_on_finish:
             frames_dirs = list(set([os.path.dirname(it) for it in frames_ds.items]))
