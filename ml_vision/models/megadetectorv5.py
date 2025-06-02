@@ -65,6 +65,7 @@ class MegadetectorV5(Model):
         results_list = self.detection_model.batch_image_detection(
             data_path=dataset.root_dir, batch_size=16, det_conf_thres=threshold)
 
+        images_dims = dataset.get_media_dims().set_index(VFields.ITEM)
         data = defaultdict(list)
         for results in results_list:
             item = results['img_id']
@@ -76,7 +77,10 @@ class MegadetectorV5(Model):
                     bbox,
                     input_format=CoordinatesFormat.x1_y1_x2_y2,
                     output_format=CoordinatesFormat.x_y_width_height,
-                    output_data_type=CoordinatesDataType.string)
+                    output_coords_type=CoordinatesType.relative,
+                    output_data_type=CoordinatesDataType.string,
+                    media_width=images_dims.loc[item][VFields.WIDTH],
+                    media_height=images_dims.loc[item][VFields.HEIGHT])
                 data[VFields.ITEM].append(item)
                 data[VFields.BBOX].append(bbox_str)
                 data[VFields.SCORE].append(float(score))
