@@ -417,12 +417,16 @@ class ImageDatasetSpeciesNet(ImageDataset):
         data = defaultdict(list)
         for prediction in json_data['predictions']:
             item = prediction["filepath"]
-            if not "DETECTOR" in prediction.get('failures', ''):
-                label_pred = prediction["prediction"]
-                label, taxa_level = ImageDatasetSpeciesNet._get_label_and_taxa_level(label_pred)
-                score = prediction["prediction_score"]
-            else:
-                label, taxa_level = 'animalia', 'kingdom'
+            try:
+                if not "DETECTOR" in prediction.get('failures', ''):
+                    label_pred = prediction["prediction"]
+                    label, taxa_level = ImageDatasetSpeciesNet._get_label_and_taxa_level(label_pred)
+                    score = prediction["prediction_score"]
+                else:
+                    label, taxa_level = 'animalia', 'kingdom'
+                    score = 1.
+            except:
+                label, taxa_level = 'failures', 'kingdom'
                 score = 1.
             id = get_random_id()
 

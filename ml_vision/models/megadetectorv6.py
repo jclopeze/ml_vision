@@ -263,8 +263,7 @@ class MegadetectorV6Video(MegadetectorV6):
         dets_frames_ds[VFields.VID_FRAME_NUM] = lambda record: mapper.loc[record[VFields.ITEM]]
 
         dets_vids_ds = dataset.create_object_level_dataset_using_detections(
-            dets_frames_ds, use_detections_labels=True,
-            fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
+            dets_frames_ds, use_detections_labels=True)
 
         if delete_frames_folder_on_finish:
             frames_dirs = list(set([os.path.dirname(it) for it in frames_ds.items]))

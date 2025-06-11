@@ -456,11 +456,11 @@ class Dataset():
         str
             Path of folder created
         """
+        folder = os.path.abspath(dest_path)
         if self.is_empty:
             logger.info(f"No data to write in folder {folder}")
             return dest_path
 
-        folder = os.path.abspath(dest_path)
         logger.info(f"Writing the dataset elements in folder {folder}")
 
         use_partitions = use_partitions and Fields.PARTITION in self.fields
