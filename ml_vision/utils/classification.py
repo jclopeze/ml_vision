@@ -17,12 +17,11 @@ class MD_LABELS():
     EMPTY: Final = 'empty'
 
 
-def wildlife_filtering_using_detections(dets_df: pd.DataFrame,
+def wildlife_filtering_using_detections(dets_item_df: pd.DataFrame,
                                         item: str,
                                         threshold: float,
                                         results_per_item: dict):
-    dets_item_thres = dets_df[(dets_df[VFields.ITEM] == item) &
-                              (dets_df[VFields.SCORE] >= threshold)]
+    dets_item_thres = dets_item_df[dets_item_df[VFields.SCORE] >= threshold]
 
     if len(dets_item_thres) > 0:
         animal_dets = dets_item_thres[dets_item_thres[VFields.LABEL] == MD_LABELS.ANIMAL]
@@ -34,9 +33,8 @@ def wildlife_filtering_using_detections(dets_df: pd.DataFrame,
             score = dets_item_thres[VFields.SCORE].max()
     else:
         label = MD_LABELS.EMPTY
-        dets_item_all = dets_df[dets_df[VFields.ITEM] == item]
-        if len(dets_item_all) > 0:
-            score = 1 - dets_item_all[VFields.SCORE].max()
+        if len(dets_item_df) > 0:
+            score = 1 - dets_item_df[VFields.SCORE].max()
         else:
             score = 1.
     results_per_item[item] = {

@@ -136,7 +136,8 @@ class MegadetectorV6(Model):
             dets_ds.to_csv(temp_csv)
             logger.info(f"Detections results were stored in {temp_csv}")
         else:
-            dets_ds = type(dataset).from_csv(dets_csv, root_dir=dataset.root_dir, validate_filenames=False)
+            dets_ds = type(dataset).from_csv(
+                dets_csv, root_dir=dataset.root_dir, validate_filenames=False)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
@@ -178,10 +179,12 @@ class MegadetectorV6(Model):
                                           dets_threshold: float) -> VisionDataset:
 
         results_per_item = Manager().dict()
+        items = dataset.items
+        dets_df = detections.df
         parallel_exec(
             func=wildlife_filtering_using_detections,
-            elements=dataset.items,
-            dets_df=detections.df,
+            elements=items,
+            dets_item_df=lambda item: dets_df[dets_df[VFields.ITEM] == item],
             item=lambda item: item,
             threshold=dets_threshold,
             results_per_item=results_per_item)
