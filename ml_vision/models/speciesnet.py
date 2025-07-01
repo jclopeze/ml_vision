@@ -131,7 +131,9 @@ class SpeciesNet(Model):
                                                    dataset=dataset.videos_ds,
                                                    country=country,
                                                    threshold=threshold,
-                                                   frames_folder=frames_folder)
+                                                   frames_folder=frames_folder,
+                                                   delete_frames_folder_on_finish=True,
+                                                   move_files_to_temp_folder=True)
 
         return type(dataset).from_datasets(classifs_imgs_ds, classifs_vids_ds)
 
@@ -152,31 +154,31 @@ class SpeciesNet(Model):
 
     @classmethod
     def _taxa_classif_per_seq_id(cls,
-                                 classifs_df: pd.DataFrame,
+                                 classifs_seq_id_df: pd.DataFrame,
                                  seq_id: str,
                                  results_per_seq_id: dict):
-        items_seq = classifs_df[classifs_df[VFields.SEQ_ID] == seq_id]
         taxa_levels = ['species', 'genus', 'family', 'order', 'class', 'kingdom', 'empty']
 
         label, taxonomy_level, score = 'empty', 'empty', 1.
+        TAXA_LEVEL_FLD = ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL
         for taxa_level in taxa_levels:
-            items_taxa_lvl = items_seq[items_seq['taxonomy_level'] == taxa_level]
+            items_taxa_lvl = classifs_seq_id_df[classifs_seq_id_df[TAXA_LEVEL_FLD] == taxa_level]
             if len(items_taxa_lvl) == 0:
                 continue
 
             taxonomy_level = taxa_level
-            label_modes = items_taxa_lvl['label'].mode()
+            label_modes = items_taxa_lvl[VFields.LABEL].mode()
             if len(label_modes) > 1:
                 highest_mode = (
-                    items_taxa_lvl[items_taxa_lvl["label"].isin(label_modes.values)]
-                    .sort_values(by='score', ascending=False)
+                    items_taxa_lvl[items_taxa_lvl[VFields.LABEL].isin(label_modes.values)]
+                    .sort_values(by=VFields.SCORE, ascending=False)
                     .iloc[0]
                 )
-                label = highest_mode['label']
-                score = highest_mode['score']
+                label = highest_mode[VFields.LABEL]
+                score = highest_mode[VFields.SCORE]
             else:
                 label = label_modes.iloc[0]
-                score = items_taxa_lvl[items_taxa_lvl.label == label].score.max()
+                score = items_taxa_lvl[items_taxa_lvl[VFields.LABEL] == label][VFields.SCORE].max()
             break
 
         results_per_seq_id[seq_id] = {
@@ -191,16 +193,25 @@ class SpeciesNet(Model):
                                  classifications: VisionDataset) -> VisionDataset:
 
         results_per_seq_id = Manager().dict()
+        seqs_ids = dataset['seq_id'].unique()
+        classifs_df = classifications.df
+
+        req_flds = [VFields.LABEL, VFields.SCORE,
+                    ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL]
+        def _get_classifs_seq_id_df(seq_id):
+            return classifs_df[classifs_df[VFields.SEQ_ID] == seq_id][req_flds]
+
         parallel_exec(
             func=cls._taxa_classif_per_seq_id,
-            elements=dataset['seq_id'].unique(),
-            classifs_df=classifications.df,
+            elements=seqs_ids,
+            classifs_seq_id_df=_get_classifs_seq_id_df,
             seq_id=lambda seq_id: seq_id,
             results_per_seq_id=results_per_seq_id)
 
+        TAXA_LVL_FL = ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL
         classif_ds = type(dataset).cast(dataset)
         classif_ds[VFields.LABEL] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['label']
-        classif_ds['taxonomy_level'] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['taxonomy_level']
+        classif_ds[TAXA_LVL_FL] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['taxonomy_level']
         classif_ds[VFields.SCORE] = lambda x: results_per_seq_id[x[VFields.SEQ_ID]]['score']
 
         return classif_ds
@@ -276,10 +287,11 @@ class SpeciesNetVideo(SpeciesNet):
                 frames_folder: str = None,
                 freq_sampling: int = 5,
                 delete_frames_folder_on_finish: bool = True,
-                batch_size: int = 500,
+                batch_size: int = None,
                 move_files_to_temp_folder: bool = True) -> VideoDataset:
         if dataset.is_empty:
             return ImageDatasetSpeciesNet(annotations=None, metadata=None)
+        TAXA_LEVEL_FLD = ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL
 
         if 'bbox' in dataset.fields and VFields.VID_FRAME_NUM in dataset.fields:
             frame_numbers = get_frame_numbers_from_vids(dataset.df)
@@ -315,7 +327,7 @@ class SpeciesNetVideo(SpeciesNet):
                 dets_frames_ds,
                 use_detections_labels=True,
                 fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM],
-                additional_fields_from_detections=['taxonomy_level'])
+                additional_fields_from_detections=[TAXA_LEVEL_FLD])
             dets_vids_dss.append(_dets_vids_ds)
 
             if delete_frames_folder_on_finish:
@@ -344,8 +356,6 @@ class ImageDatasetSpeciesNet(ImageDataset):
 
     class AnnotationFields(VisionDataset.AnnotationFields):
         TAXA_LEVEL = 'taxonomy_level'
-
-    TAXA_LEVEL = 'taxonomy_level'
 
     def to_json(self, dest_path: str) -> dict:
 

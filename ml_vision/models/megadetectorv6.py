@@ -181,10 +181,14 @@ class MegadetectorV6(Model):
         results_per_item = Manager().dict()
         items = dataset.items
         dets_df = detections.df
+
+        def _get_dets_item_df(item):
+            return dets_df[dets_df[VFields.ITEM] == item][[VFields.LABEL, VFields.SCORE]]
+
         parallel_exec(
             func=wildlife_filtering_using_detections,
             elements=items,
-            dets_item_df=lambda item: dets_df[dets_df[VFields.ITEM] == item],
+            dets_item_df=_get_dets_item_df,
             item=lambda item: item,
             threshold=dets_threshold,
             results_per_item=results_per_item)

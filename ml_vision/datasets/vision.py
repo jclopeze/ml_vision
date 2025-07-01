@@ -250,6 +250,7 @@ class VisionDataset(Dataset):
     def batch_gen(self, batch_size: int) -> Iterator[VisionDataset]:
         items = self.items
         n_items = len(items)
+        batch_size = batch_size or n_items
         n_batches = math.ceil(n_items / batch_size)
         for i in range(n_batches):
             _items = items[i * batch_size: (i+1) * batch_size]
@@ -1275,8 +1276,12 @@ class VideoDataset(VisionDataset):
 
         avoid_reading = False
         if not overwrite and verify_first_frame_to_skip:
-            # TODO: Check the case when frame_numbers are given
-            first_frame_number = 0 if zero_based_indexing else 1
+            if not freq_sampling is None:
+                first_frame_number = 0 if zero_based_indexing else 1
+            elif not frame_numbers is None:
+                first_frame_number = frame_numbers[0]
+            else:
+                raise Exception('Case when time_positions is given not implemented')
             first_frame_filename = VideoDataset.get_frame_path(
                 first_frame_number, frames_folder=output_folder)
             if os.path.isfile(first_frame_filename):
@@ -1289,7 +1294,7 @@ class VideoDataset(VisionDataset):
         fps = vidcap.get(cv2.CAP_PROP_FPS)
         width = vidcap.get(cv2.CAP_PROP_FRAME_WIDTH)
         height = vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-        if freq_sampling is not None:
+        if not freq_sampling is None:
             if freq_sampling > fps:
                 freq_sampling = fps
             every_n_frames = round(fps / freq_sampling)  # TODO: think about removing round()
@@ -1312,11 +1317,11 @@ class VideoDataset(VisionDataset):
             # frame_number can be 1-base so that the name of the first frame is frame00001.jpg
             frame_number = frame_idx if zero_based_indexing else frame_idx + 1
 
-            if freq_sampling is not None:
+            if not freq_sampling is None:
                 if frame_idx % every_n_frames != 0:
                     continue
             else:
-                if frame_number not in frame_numbers:
+                if not frame_number in frame_numbers:
                     continue
 
             frame_filename = VideoDataset.get_frame_path(frame_number, frames_folder=output_folder)
@@ -1328,7 +1333,6 @@ class VideoDataset(VisionDataset):
 
             try:
                 cv2.imwrite(os.path.normpath(frame_filename), image)
-                assert os.path.isfile(frame_filename), f'Output frame {frame_filename} unavailable'
             except Exception as e:
                 print(f'Error on frame {frame_number} of {n_frames}: {str(e)}')
 
