@@ -121,23 +121,13 @@ class MegadetectorV6(Model):
                  freq_video_sampling: int = 5,
                  frames_folder: str = None,
                  return_detections: bool = False,
-                 delete_frames_folder_on_finish: bool = True,
-                 dets_csv=None
+                 delete_frames_folder_on_finish: bool = True
                  ) -> Union[VisionDataset, Tuple[VisionDataset, VisionDataset]]:
-
-        # TODO: Temporary way to solve the problem when the program terminates abruptly after executing the inference
-        if dets_csv is None:
-            dets_ds = self.predict(
-                dataset=dataset,
-                freq_video_sampling=freq_video_sampling,
-                frames_folder=frames_folder,
-                delete_frames_folder_on_finish=delete_frames_folder_on_finish)
-            temp_csv = os.path.join(get_temp_folder(), f"dets-{get_random_id()}.csv")
-            dets_ds.to_csv(temp_csv)
-            logger.info(f"Detections results were stored in {temp_csv}")
-        else:
-            dets_ds = type(dataset).from_csv(
-                dets_csv, root_dir=dataset.root_dir, validate_filenames=False)
+        dets_ds = self.predict(
+            dataset=dataset,
+            freq_video_sampling=freq_video_sampling,
+            frames_folder=frames_folder,
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
