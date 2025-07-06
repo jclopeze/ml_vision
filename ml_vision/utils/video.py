@@ -15,6 +15,9 @@ from ml_vision.utils.vision import VisionFields as VFields
 
 logger = get_logger(__name__)
 
+__all__ = ['get_videos_dims', 'set_video_dims', 'frames_to_video', 'get_file_id_for_frame',
+           'get_video_dims', 'get_frame_numbers_from_vids']
+
 
 def get_videos_dims(videos: Iterable[str]) -> pd.DataFrame:
     """Determine the dimensions of `videos`

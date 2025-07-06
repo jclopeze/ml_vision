@@ -6,15 +6,17 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
-from typing import Union
+from typing import Union, Iterable, Callable
 
 import multiprocessing
 
-from ml_base.utils.logger import get_logger, debugger
+from .logger import get_logger
 
 logger = get_logger(__name__)
-debug_parallel = debugger.get_debug_parallel_env()
 global_temp_dir = None
+
+__all__ = ['is_array_like', 'str2bool', 'get_chunk_func', 'parallel_exec', 'get_temp_folder',
+           'download_file', 'unzip_file', 'delete_dirs']
 
 
 def is_array_like(obj):
@@ -67,7 +69,10 @@ def str2bool(v):
         raise Exception('Boolean value expected.')
 
 
-def get_chunk(elements, num_chunks, chunk_num, sort_elements=True):
+def get_chunk_func(elements: Iterable,
+                   num_chunks: int,
+                   chunk_num: int,
+                   sort_elements: bool = True) -> list:
     """Divide a set of `elements` into chunks so that they can be processed in different tasks.
     If `num_chunks` is None or `chunk_num` is None, the original elements will be returned.
 
@@ -99,13 +104,12 @@ def get_chunk(elements, num_chunks, chunk_num, sort_elements=True):
     last = len(_elements) if chunk_num == num_chunks else chunk_size*chunk_num
     return _elements[first:last]
 
-def parallel_exec(func, elements, **kwargs):
+
+def parallel_exec(func: Callable, elements: Iterable, **kwargs):
     """Function to perform the execution of `func` in parallel from the elements in `elements`,
     sending the arguments contained in `kwargs`.
     If any of those arguments is a callable, it will be called by sending it the `elem` element
     obtained from the iteration in `elements`.
-    In case the environment variable `DEBUG_PARALLEL == True` the execution will be performed
-    iteratively, allowing the debugging of the `func` function.
 
     Parameters
     ----------
@@ -121,11 +125,10 @@ def parallel_exec(func, elements, **kwargs):
     """
     tuples = []
     warn_shown = False
+    _debug = False
     if 'debug_parallel' in kwargs:
         _debug = kwargs['debug_parallel']
         del kwargs['debug_parallel']
-    else:
-        _debug = debug_parallel
     for elem in elements:
         args = tuple([fld(elem) if callable(fld) else fld for fld in kwargs.values()])
         if _debug:
@@ -210,6 +213,7 @@ def unzip_file(input_file: str, output_folder: str = None) -> None:
 
     with zipfile.ZipFile(input_file, 'r') as zf:
         zf.extractall(output_folder)
+
 
 def delete_dirs(dirs_to_del: Union[str, list[str]]):
     if dirs_to_del is None:

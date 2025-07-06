@@ -1,6 +1,7 @@
 import os
 from enum import Enum
 
+__all__ = ['ENVS', 'ENV']
 
 class ENVS(Enum):
     """Allowed types of environments

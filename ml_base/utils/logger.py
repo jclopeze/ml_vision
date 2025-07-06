@@ -4,8 +4,9 @@ import logging
 import tempfile
 import platform
 
-from ml_base.utils.env import ENV, ENVS
-from pdb import set_trace
+from .env import ENV, ENVS
+
+__all__ = ['get_logger']
 
 LOGGING_PATH = os.environ.get('LOGGING_PATH')
 if LOGGING_PATH is not None:
@@ -63,34 +64,3 @@ def get_logger(name, path=PATH, level=DEFAULT_LEVEL):
     logger.addHandler(fileHandler)
 
     return logger
-
-class debugger:
-    d = None
-    bp = False
-
-    @classmethod
-    def create(cls, debug, bp=False):
-
-        cls.d = get_logger("DEBUG")
-        cls.bp = bp
-        get_logger("DEBUG").setLevel(logging.DEBUG if debug else logging.INFO)
-
-    @classmethod
-    def debug(cls,
-              msg: str,
-              obj=None):
-        if cls.d:
-            cls.d.debug(msg)
-
-            if cls.bp and obj:
-                set_trace()
-
-    @classmethod
-    def get_debug_parallel_env(cls):
-        v = os.environ.get('DEBUG_PARALLEL', 'False')
-        return v.lower() in ('yes', 'true', 't', 'y', '1')
-
-    @classmethod
-    def get_validate_filenames_env(cls):
-        v = os.environ.get('VALIDATE_FILENAMES', 'True')
-        return v.lower() in ('yes', 'true', 't', 'y', '1')

@@ -1015,17 +1015,11 @@ class VideoDataset(VisionDataset):
         frame_numbers_fn = None
         time_positions_fn = None
         if frame_numbers is not None:
-            # msg = f'Items in frame_numbers are not present in the dataset'
-            # assert len(set(frame_numbers.keys()) & set(items)) == len(frame_numbers), msg
-
             def frame_numbers_fn(record):
                 return frame_numbers.get(record[VFields.ITEM], [])
             logger.info(f"Converting {len(videos_ds.items)} videos to frames, "
                         f"given frame numbers for each video.")
         elif time_positions is not None:
-            # msg = f'Items in time_positions are not present in the dataset'
-            # assert len(set(time_positions.keys()) & set(items)) == len(time_positions), msg
-
             def time_positions_fn(record):
                 return time_positions.get(record[VFields.ITEM], [])
             logger.info(f"Converting {len(videos_ds.items)} videos to frames, "

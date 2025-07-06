@@ -5,14 +5,13 @@ from multiprocessing import Manager
 import os
 import pandas as pd
 from collections import defaultdict
-import uuid
 
 from ml_base.model import Model as BaseModel
 from ml_base.dataset import Partitions
 from ml_base.utils.dataset import get_sorted_df
 from ml_base.utils.dataset import read_labelmap_file
 from ml_base.utils.dataset import write_labelmap_file
-from ml_base.utils.logger import get_logger, debugger
+from ml_base.utils.logger import get_logger
 from ml_base.utils.misc import parallel_exec
 
 from ml_vision.datasets import ImageDataset, VisionDataset
@@ -38,8 +37,6 @@ from tensorflow.keras.applications import EfficientNetV2B0, EfficientNetV2B1, Ef
 from tensorflow.keras.applications import EfficientNetV2B3
 
 logger = get_logger(__name__)
-debug = debugger.debug
-
 
 class TFKerasBasicModel(BaseModel):
 

@@ -193,8 +193,11 @@ class SpeciesNet(Model):
                                  classifications: VisionDataset) -> VisionDataset:
 
         results_per_seq_id = Manager().dict()
-        seqs_ids = dataset['seq_id'].unique()
         classifs_df = classifications.df
+        if VFields.SEQ_ID in dataset.fields:
+            seqs_ids = dataset[VFields.SEQ_ID].unique()
+        else:
+            seqs_ids = dataset[VFields.FILE_ID].unique()
 
         req_flds = [VFields.LABEL, VFields.SCORE,
                     ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL]

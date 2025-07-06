@@ -9,6 +9,9 @@ from ml_vision.utils.vision import Fields as VFields
 
 logger = get_logger(__name__)
 
+__all__ = ['MD_LABELS', 'wildlife_filtering_using_detections',
+           'set_label_and_score_for_item_in_ensemble']
+
 
 class MD_LABELS():
     ANIMAL: Final = 'animal'

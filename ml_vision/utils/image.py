@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import os
 import math
-from multiprocessing import Manager
 import pandas as pd
 from typing import Iterable, Tuple, List, Union
 import numpy as np
@@ -12,7 +11,6 @@ from PIL import ImageFile
 import cv2
 
 from ml_base.utils.logger import get_logger
-from ml_base.utils.misc import parallel_exec
 
 from ml_vision.utils.vision import VisionFields
 from ml_vision.utils.coords import CoordinatesType, CoordinatesFormat, CoordinatesDataType
@@ -40,6 +38,8 @@ COLORS_MAP = {
     'RED': RED,
 }
 
+__all__ = ['COLORS_MAP', 'set_image_dims', 'draw_detections_of_image', 'draw_bboxes_in_image',
+           'anonymize_image', 'crop_bboxes_on_image', 'get_bbox_from_json_record']
 
 def set_image_dims(image: str, images_dict: dict):
     """Determines the dims of the image passed in `image` and store it in the `images_dict`

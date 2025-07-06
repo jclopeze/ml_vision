@@ -9,6 +9,8 @@ import pandas as pd
 from numpy.random import default_rng
 from collections import namedtuple
 
+__all__ = ['gradient_group_stratify']
+
 Solution = namedtuple("Solution", "cost index")
 
 def index_to_str(idx):
@@ -165,9 +167,9 @@ def generate_cosine_move(sample_counts, idx, p, expanded_set, intensify):
 def generate_counts_from_ds(df, group_field):
     x1 = df.groupby([group_field])['item'].count().to_frame()
     x2 = df.groupby([group_field, 'label'])['item'].count().unstack().fillna(0)
-    
+
     x = pd.merge(left=x1, right=x2, left_index=True, right_index=True)
-    
+
     return x.to_numpy(), x
 
 

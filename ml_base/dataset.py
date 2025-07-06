@@ -1,5 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""Module with the specification of the Dataset interface, which defines the common properties and
+basic functionality of datasets of different modalities, allowing to extend it for particular
+cases, such as datasets of image, video, audio, etc.
+
+Datasets are structured data collections that contain information related to the elements used in
+the different stages of ML pipelines (e.g., training, evaluation, and inference), which includes
+both the metadata and annotations associated with them. However, different producers of such
+datasets often use different names and data formats for fields with the same semantic meaning, so
+if we intend to create ML pipelines that are agnostic to the datasets they use, it becomes
+necessary to have a common interface to all of them, thus allowing us to apply the same operations
+on them and interpret the information they contain in the same way, regardless of their source of
+origin.
+"""
 from __future__ import annotations
 from pathlib import Path
 from functools import partial
@@ -13,37 +26,35 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
-from .utils.dataset import seek_files
-from .utils.dataset import fix_partitioning_by_priorities
-from .utils.dataset import append_to_partition
-from .utils.dataset import get_file_id_str_from_item
-from .utils.dataset import get_cleaned_label
-from .utils.dataset import fix_category_mapping
-from .utils.dataset import map_category
-from .utils.dataset import set_field_types_in_data
-from .utils.dataset import get_random_id
-from .utils.dataset import get_abspath_and_validate_item
-from .utils.dataset import get_cats_from_source
-from .utils.dataset import sample_data
-from .utils.dataset import get_media_name_with_prefix
-from .utils.dataset import get_default_fields
-from .utils.dataset import Fields
+from .utils.dataset import (
+    seek_files, fix_partitioning_by_priorities, append_to_partition, get_file_id_str_from_item,
+    get_cleaned_label, fix_category_mapping, map_category, set_field_types_in_data, get_random_id,
+    get_abspath_and_validate_item, get_cats_from_source, sample_data, get_media_name_with_prefix,
+    get_default_fields, Fields)
 from .utils.stratified_group_split import gradient_group_stratify
-from .utils.misc import is_array_like
-from .utils.misc import parallel_exec
-from .utils.misc import download_file
-from .utils.misc import get_chunk as get_chunk_func
-from .utils.logger import get_logger, debugger
+from .utils.misc import is_array_like, parallel_exec, download_file, get_chunk as get_chunk_func
+from .utils.logger import get_logger
 
 logger = get_logger(__name__)
-val_filenames_debug = debugger.get_validate_filenames_env()
 pd.options.mode.chained_assignment = None
 
 
 class Dataset():
+    """Class that defines the common properties and implements basic functionality of the datasets
+
+    Datasets can be created from very diverse data sources (e.g., files on a local device, public
+    data collections, private databases, etc.), and their metadata and annotation information can
+    be available in different formats (e.g. the names of the folders in which the files are stored,
+    in CSV or JSON files, in databases, etc.). However, datasets from different sources have common
+    properties and behaviors, so the Dataset API provides methods that allow to interact with them
+    in a standard way, even allowing to join them to create datasets with data from different
+    sources to be used in ML pipelines and data analysis.
+
+"""
 
     # region FIELDS DEFINITIONS
     class MetadataFields():
+        # The ITEM field serves to join both the metadata and the annotations
         ITEM: Final = Fields.ITEM
         FILE_ID: Final = Fields.FILE_ID
         FILENAME: Final = Fields.FILE_NAME
@@ -175,6 +186,22 @@ class Dataset():
     def annotations_default_fields(self) -> set:
         return set(get_default_fields(self.AnnotationFields))
 
+    @property
+    def lbls(self) -> pd.Series:
+        assert Fields.LABEL in self.fields
+        return self[Fields.LABEL].value_counts()
+
+    @property
+    def item0(self) -> str:
+        if not self.is_empty:
+            return self.annotations.iloc[0][Fields.ITEM]
+        else:
+            return None
+
+    @property
+    def valid0(self) -> bool:
+        return os.path.isfile(self.item0())
+
     # endregion
 
     # region CONSTRUCTOR
@@ -221,6 +248,36 @@ class Dataset():
                        not_exist_ok: bool = False,
                        avoid_initialization: bool = False,
                        **kwargs) -> Dataset:
+        """Create a Dataset instance from the contents of `dataframe`.
+
+        Parameters
+        ----------
+        dataframe
+            Dataframe that contains the information with which the dataset instance will be
+            created, both the metadata and the possible annotations of each element.
+            The `dataframe` columns must match in name with those defined in
+            `Dataset.MetadataFields` and `Dataset.AnnotationFields`, otherwise they will not be
+            taken into account, unless the mapping is done using the `mapping_fields` parameter
+        root_dir
+            Path of the root directory in which the dataset elements are stored
+        accept_all_fields, optional
+            Whether or not to include in the dataset the columns of `dataframe` that are not
+            contained in `Dataset.MetadataFields` or `Dataset.AnnotationFields`, by default False
+        mapping_fields, optional
+            _description_, by default None
+        use_partitions, optional
+            _description_, by default True
+        validate_filenames, optional
+            _description_, by default True
+        not_exist_ok, optional
+            _description_, by default False
+        avoid_initialization, optional
+            _description_, by default False
+
+        Returns
+        -------
+            _description_
+        """
         assert isinstance(dataframe, pd.DataFrame), "A pd.DataFrame must be provided for data"
         if len(dataframe) == 0:
             logger.debug(f"The dataset does not contain any elements.")
@@ -560,7 +617,7 @@ class Dataset():
 
         df = self._merge_annotations_and_metadata()
 
-        if columns is not None:
+        if not columns is None:
             columns = [c for c in columns if c in df.columns]
         if not columns:
             columns = self._get_ordered_fields_in_dataset()
@@ -839,9 +896,6 @@ class Dataset():
         cats = get_cats_from_source(categories)
         return self.filter_by_field(Fields.LABEL, cats, mode=mode, inplace=inplace)
 
-    # TODO: remove asap
-    def filter_by_column(self, column, values, mode='include', inplace=True) -> Dataset:
-        return self.filter_by_field(column, values, mode, inplace)
 
     def filter_by_field(self,
                         field: str,
@@ -914,48 +968,6 @@ class Dataset():
             Partitions.check_partition(partition)
             return self.filter_by_field(Fields.PARTITION, partition, mode=mode, inplace=inplace)
         return self
-
-    def filter_by_label_counts(self,
-                               min_label_counts: int = None,
-                               max_label_counts: int = None,
-                               label_counts: int = None,
-                               inplace: bool = True) -> Dataset:
-        """Filter the dataset with respect to the number of samples per label it contains
-
-        Parameters
-        ----------
-        min_label_counts : int, optional
-            Minimum number of samples per label, by default None
-        max_label_counts : int, optional
-            Maximum number of samples per label, by default None
-        label_counts : int, optional
-            Exact number of samples per label, by default None
-        inplace : bool, optional
-            If True, perform operation in-place, by default True
-
-        Returns
-        -------
-        Dataset
-            Instance of the resulting dataset
-        """
-        if self.is_empty:
-            return self
-        assert_cond = bool(min_label_counts) + bool(max_label_counts) + bool(label_counts) == 1
-        msg = "You must configure only one of: min_label_counts, max_label_counts and label_counts"
-        assert assert_cond, msg
-
-        instance = self if inplace else self.copy()
-        counts = self.label_counts()
-        if min_label_counts is not None:
-            labels_to_search = counts[counts >= min_label_counts].index.values
-        elif max_label_counts is not None:
-            labels_to_search = counts[counts <= min_label_counts].index.values
-        else:
-            labels_to_search = counts[counts == min_label_counts].index.values
-
-        self.filter_by_categories(labels_to_search, mode='include', inplace=True)
-
-        return instance
 
     def filter_by_score(self,
                         max_score: float = None,
@@ -1136,30 +1148,6 @@ class Dataset():
                        dataset.root_dir,
                        avoid_initialization=True)
         return instance
-
-    #   endregion
-
-    #   region DEBUGGING METHODS
-
-    def labels(self) -> pd.Series:
-        return self.label_counts()
-
-    def item0(self) -> str:
-        return self.annotations.iloc[0][Fields.ITEM]
-
-    def valid0(self) -> bool:
-        return os.path.isfile(self.item0())
-
-    def label_counts(self) -> pd.Series:
-        """Get the `value_counts` of the label field in the dataset
-
-        Returns
-        -------
-        pd.Series
-            Series with the `value_counts` of the label field
-        """
-        assert Fields.LABEL in self.fields
-        return self[Fields.LABEL].value_counts()
 
     #   endregion
 
@@ -1417,7 +1405,6 @@ class Dataset():
             Set to False to speed up execution time. By default True
         """
         assert root_dir is not None or validate_filenames is False, "root_dir must be assigned"
-        validate_filenames = validate_filenames and val_filenames_debug
 
         if root_dir is not None or validate_filenames != False:
             items_to_abspaths = Manager().dict()
