@@ -329,7 +329,7 @@ class SpeciesNetVideo(SpeciesNet):
                     dataset, fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
 
             if move_files_to_temp_folder and temp_folder_to_move_files is None:
-                temp_folder_to_move_files = os.path.join(frames_ds.root_dir, get_temp_folder())
+                temp_folder_to_move_files = os.path.join(frames_ds.root_dir, get_random_id())
 
             # TODO: if move_files_to_temp_folder and delete_frames_folder_on_finish, avoid moving the frames to the original path
             dets_frames_ds = SpeciesNetImage.predict(

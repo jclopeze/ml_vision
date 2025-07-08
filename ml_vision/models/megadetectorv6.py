@@ -269,7 +269,7 @@ class MegadetectorV6Video(MegadetectorV6):
             dataset, frames_folder, freq_sampling=freq_video_sampling, add_new_file_id=False)
 
         if move_files_to_temp_folder and temp_folder_to_move_files is None:
-            temp_folder_to_move_files = os.path.join(frames_ds.root_dir, get_temp_folder())
+            temp_folder_to_move_files = os.path.join(frames_ds.root_dir, get_random_id())
 
         dets_frames_ds = MegadetectorV6Image.predict(
             model=model,
