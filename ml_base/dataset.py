@@ -32,7 +32,7 @@ from .utils.dataset import (
     get_abspath_and_validate_item, get_cats_from_source, sample_data, get_media_name_with_prefix,
     get_default_fields, Fields)
 from .utils.stratified_group_split import gradient_group_stratify
-from .utils.misc import is_array_like, parallel_exec, download_file, get_chunk as get_chunk_func
+from .utils.misc import is_array_like, parallel_exec, download_file, get_chunk_func
 from .utils.logger import get_logger
 
 logger = get_logger(__name__)
