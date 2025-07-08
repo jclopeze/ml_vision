@@ -106,7 +106,9 @@ class SpeciesNet(Model):
                 dataset: VisionDataset,
                 country: str = None,
                 threshold: float = 0.01,
-                frames_folder: str = None) -> VisionDataset:
+                frames_folder: str = None,
+                delete_frames_folder_on_finish: bool = True,
+                move_files_to_temp_folder: bool = True) -> VisionDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -122,18 +124,21 @@ class SpeciesNet(Model):
             Image dataset with Megadetector predictions
         """
 
-        classifs_imgs_ds = SpeciesNetImage.predict(model=self,
-                                                   dataset=dataset.images_ds,
-                                                   country=country,
-                                                   threshold=threshold)
+        classifs_imgs_ds = SpeciesNetImage.predict(
+            model=self,
+            dataset=dataset.images_ds,
+            country=country,
+            threshold=threshold,
+            move_files_to_temp_folder=move_files_to_temp_folder)
 
-        classifs_vids_ds = SpeciesNetVideo.predict(model=self,
-                                                   dataset=dataset.videos_ds,
-                                                   country=country,
-                                                   threshold=threshold,
-                                                   frames_folder=frames_folder,
-                                                   delete_frames_folder_on_finish=True,
-                                                   move_files_to_temp_folder=True)
+        classifs_vids_ds = SpeciesNetVideo.predict(
+            model=self,
+            dataset=dataset.videos_ds,
+            country=country,
+            threshold=threshold,
+            frames_folder=frames_folder,
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish,
+            move_files_to_temp_folder=move_files_to_temp_folder)
 
         return type(dataset).from_datasets(classifs_imgs_ds, classifs_vids_ds)
 
@@ -141,12 +146,17 @@ class SpeciesNet(Model):
                  dataset: VisionDataset,
                  country: str = None,
                  threshold: float = 0.01,
-                 frames_folder: str = None):
+                 frames_folder: str = None,
+                 delete_frames_folder_on_finish: bool = True,
+                 move_files_to_temp_folder: bool = True):
 
-        classifs_ds = self.predict(dataset=dataset,
-                                   country=country,
-                                   threshold=threshold,
-                                   frames_folder=frames_folder)
+        classifs_ds = self.predict(
+            dataset=dataset,
+            country=country,
+            threshold=threshold,
+            frames_folder=frames_folder,
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish,
+            move_files_to_temp_folder=move_files_to_temp_folder)
 
         classif_ds = self.taxonomic_classification(dataset=dataset, classifications=classifs_ds)
 
@@ -201,6 +211,7 @@ class SpeciesNet(Model):
 
         req_flds = [VFields.LABEL, VFields.SCORE,
                     ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL]
+
         def _get_classifs_seq_id_df(seq_id):
             return classifs_df[classifs_df[VFields.SEQ_ID] == seq_id][req_flds]
 
@@ -234,7 +245,8 @@ class SpeciesNetImage(SpeciesNet):
                 dataset: ImageDataset,
                 country: str = None,
                 threshold: float = 0.01,
-                move_files_to_temp_folder: bool = True) -> ImageDataset:
+                move_files_to_temp_folder: bool = True,
+                temp_folder_to_move_files: str = None) -> ImageDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -255,9 +267,10 @@ class SpeciesNetImage(SpeciesNet):
         ds = dataset.copy()
         if move_files_to_temp_folder:
             # We need to be sure that only the files of the dataset are stored in root_dir
-            temp_folder = os.path.join(get_temp_folder(), f"images-{get_random_id()}")
+            if temp_folder_to_move_files is None:
+                temp_folder_to_move_files = os.path.join(get_temp_folder(), get_random_id())
             ds.to_folder(
-                temp_folder,
+                temp_folder_to_move_files,
                 use_labels=False,
                 move_files=True,
                 preserve_directory_hierarchy=True,
@@ -290,8 +303,9 @@ class SpeciesNetVideo(SpeciesNet):
                 frames_folder: str = None,
                 freq_sampling: int = 5,
                 delete_frames_folder_on_finish: bool = True,
-                batch_size: int = None,
-                move_files_to_temp_folder: bool = True) -> VideoDataset:
+                move_files_to_temp_folder: bool = True,
+                temp_folder_to_move_files: str = None,
+                batch_size: int = None) -> VideoDataset:
         if dataset.is_empty:
             return ImageDatasetSpeciesNet(annotations=None, metadata=None)
         TAXA_LEVEL_FLD = ImageDatasetSpeciesNet.AnnotationFields.TAXA_LEVEL
@@ -314,12 +328,17 @@ class SpeciesNetVideo(SpeciesNet):
                 frames_ds = frames_ds.create_object_level_dataset_using_detections(
                     dataset, fields_for_merging=[VFields.FILE_ID, VFields.VID_FRAME_NUM])
 
+        if move_files_to_temp_folder and temp_folder_to_move_files is None:
+            temp_folder_to_move_files = os.path.join(frames_ds.root_dir, get_temp_folder())
+
+            # TODO: if move_files_to_temp_folder and delete_frames_folder_on_finish, avoid moving the frames to the original path
             dets_frames_ds = SpeciesNetImage.predict(
                 model=model,
                 dataset=frames_ds,
                 country=country,
                 threshold=threshold,
-                move_files_to_temp_folder=move_files_to_temp_folder)
+                move_files_to_temp_folder=move_files_to_temp_folder,
+                temp_folder_to_move_files=temp_folder_to_move_files)
 
             mapper = (
                 frames_ds.df.drop_duplicates(VFields.ITEM)
@@ -433,19 +452,19 @@ class ImageDatasetSpeciesNet(ImageDataset):
             try:
                 if not "DETECTOR" in prediction.get('failures', ''):
                     label_pred = prediction["prediction"]
-                    label, taxa_level = ImageDatasetSpeciesNet._get_label_and_taxa_level(label_pred)
+                    label, taxa_levl = ImageDatasetSpeciesNet._get_label_and_taxa_level(label_pred)
                     score = prediction["prediction_score"]
                 else:
-                    label, taxa_level = 'animalia', 'kingdom'
+                    label, taxa_levl = 'animalia', 'kingdom'
                     score = 1.
             except:
-                label, taxa_level = 'failures', 'kingdom'
+                label, taxa_levl = 'failures', 'kingdom'
                 score = 1.
             id = get_random_id()
 
             data[VFields.ITEM].append(item)
             data[VFields.LABEL].append(label)
-            data[cls.AnnotationFields.TAXA_LEVEL].append(taxa_level)
+            data[cls.AnnotationFields.TAXA_LEVEL].append(taxa_levl)
             data[VFields.SCORE].append(score)
             data[VFields.ID].append(id)
 

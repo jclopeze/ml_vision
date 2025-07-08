@@ -85,7 +85,8 @@ class MegadetectorV6(Model):
                 threshold: float = 0.01,
                 freq_video_sampling: int = 5,
                 frames_folder: str = None,
-                delete_frames_folder_on_finish: bool = True) -> VisionDataset:
+                delete_frames_folder_on_finish: bool = True,
+                move_files_to_temp_folder: bool = True) -> VisionDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -104,14 +105,16 @@ class MegadetectorV6(Model):
         dets_imgs_ds = MegadetectorV6Image.predict(
             model=self,
             dataset=dataset.images_ds,
-            threshold=threshold)
+            threshold=threshold,
+            move_files_to_temp_folder=move_files_to_temp_folder)
         dets_vids_ds = MegadetectorV6Video.predict(
             model=self,
             dataset=dataset.videos_ds,
             threshold=threshold,
             freq_video_sampling=freq_video_sampling,
             frames_folder=frames_folder,
-            delete_frames_folder_on_finish=delete_frames_folder_on_finish)
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish,
+            move_files_to_temp_folder=move_files_to_temp_folder)
 
         return type(dataset).from_datasets(dets_imgs_ds, dets_vids_ds)
 
@@ -121,13 +124,15 @@ class MegadetectorV6(Model):
                  freq_video_sampling: int = 5,
                  frames_folder: str = None,
                  return_detections: bool = False,
-                 delete_frames_folder_on_finish: bool = True
+                 delete_frames_folder_on_finish: bool = True,
+                 move_files_to_temp_folder: bool = True
                  ) -> Union[VisionDataset, Tuple[VisionDataset, VisionDataset]]:
         dets_ds = self.predict(
             dataset=dataset,
             freq_video_sampling=freq_video_sampling,
             frames_folder=frames_folder,
-            delete_frames_folder_on_finish=delete_frames_folder_on_finish)
+            delete_frames_folder_on_finish=delete_frames_folder_on_finish,
+            move_files_to_temp_folder=move_files_to_temp_folder)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
@@ -197,7 +202,8 @@ class MegadetectorV6Image(MegadetectorV6):
     def predict(model: MegadetectorV6,
                 dataset: ImageDataset,
                 threshold: float = 0.01,
-                move_files_to_temp_folder=True) -> ImageDataset:
+                move_files_to_temp_folder: bool = True,
+                temp_folder_to_move_files: str = None) -> ImageDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -218,9 +224,10 @@ class MegadetectorV6Image(MegadetectorV6):
         ds = dataset.copy()
         if move_files_to_temp_folder:
             # We need to be sure that only the files of the dataset are stored in root_dir
-            temp_folder = os.path.join(get_temp_folder(), f"images-{get_random_id()}")
+            if temp_folder_to_move_files is None:
+                temp_folder_to_move_files = os.path.join(get_temp_folder(), get_random_id())
             ds.to_folder(
-                temp_folder,
+                temp_folder_to_move_files,
                 use_labels=False,
                 move_files=True,
                 preserve_directory_hierarchy=True,
@@ -252,17 +259,24 @@ class MegadetectorV6Video(MegadetectorV6):
                 threshold: float = 0.01,
                 freq_video_sampling: int = 5,
                 frames_folder: str = None,
-                delete_frames_folder_on_finish: bool = True) -> VideoDataset:
+                delete_frames_folder_on_finish: bool = True,
+                move_files_to_temp_folder: bool = True,
+                temp_folder_to_move_files: str = None) -> VideoDataset:
         if dataset.is_empty:
             return VideoDataset(annotations=None, metadata=None)
 
         frames_ds = VideoDataset.create_frames_dataset(
             dataset, frames_folder, freq_sampling=freq_video_sampling, add_new_file_id=False)
 
-        dets_frames_ds = MegadetectorV6Image.predict(model=model,
-                                                     dataset=frames_ds,
-                                                     threshold=threshold,
-                                                     move_files_to_temp_folder=False)
+        if move_files_to_temp_folder and temp_folder_to_move_files is None:
+            temp_folder_to_move_files = os.path.join(frames_ds.root_dir, get_temp_folder())
+
+        dets_frames_ds = MegadetectorV6Image.predict(
+            model=model,
+            dataset=frames_ds,
+            threshold=threshold,
+            move_files_to_temp_folder=move_files_to_temp_folder,
+            temp_folder_to_move_files=temp_folder_to_move_files)
 
         mapper = frames_ds.df.set_index(VFields.ITEM)[VFields.VID_FRAME_NUM]
         dets_frames_ds[VFields.VID_FRAME_NUM] = lambda record: mapper.loc[record[VFields.ITEM]]
