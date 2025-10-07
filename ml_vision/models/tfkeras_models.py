@@ -6,7 +6,7 @@ import os
 import pandas as pd
 from collections import defaultdict
 
-from ml_base.model import Model as BaseModel
+from ml_base.model import IModel as BaseModel
 from ml_base.dataset import Partitions
 from ml_base.utils.dataset import get_sorted_df
 from ml_base.utils.dataset import read_labelmap_file

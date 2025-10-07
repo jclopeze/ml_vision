@@ -9,8 +9,8 @@ import os
 import pandas as pd
 from typing import Union, Final, List, Tuple
 
-from ml_base.model import Model
-from ml_base.eval import Metric
+from ml_base.model import IModel
+from ml_base.eval import Metric, Evaluator
 from ml_base.utils.misc import delete_dirs
 from ml_base.utils.misc import parallel_exec
 from ml_base.utils.logger import get_logger
@@ -31,7 +31,7 @@ from PytorchWildlife.models import detection as pw_detection
 logger = get_logger(__name__)
 
 
-class MegadetectorV5(Model):
+class MegadetectorV5(IModel):
     urls: Final = {
         'a': 'https://github.com/microsoft/CameraTraps/releases/download/v5.0/md_v5a.0.0.pt',
         'b': 'https://github.com/microsoft/CameraTraps/releases/download/v5.0/md_v5b.0.0.pt'
@@ -146,16 +146,14 @@ class MegadetectorV5(Model):
                  metrics: List[Metric],
                  dets_threshold: float,
                  dataset_pred: VisionDataset = None,
-                 verbose: bool = False,
-                 return_dict: bool = False) -> Union[list, dict]:
+                 verbose: bool = False) -> Evaluator:
         if dataset_pred is None:
             dataset_pred = self.classify(dataset=dataset_true, dets_threshold=dets_threshold)
 
         return super().evaluate(dataset_true=dataset_true,
                                 metrics=metrics,
                                 dataset_pred=dataset_pred,
-                                verbose=verbose,
-                                return_dict=return_dict)
+                                verbose=verbose)
 
     def train(self,
               dataset,
@@ -442,7 +440,7 @@ class ImageDatasetMD(ImageDataset):
                 'format_version': '1.0'
             }
         }
-        if dest_path is not None:
+        if not dest_path is None:
             with open(dest_path, 'w') as f:
                 json.dump(final_output, f, indent=1)
         return final_output
@@ -553,8 +551,8 @@ class ImageDatasetMD(ImageDataset):
             return
         detections = []
         for _, record in rows_item.iterrows():
-            img_width = images_dims.loc[item][VFields.WIDTH] if images_dims is not None else None
-            img_height = images_dims.loc[item][VFields.HEIGHT] if images_dims is not None else None
+            img_width = images_dims.loc[item][VFields.WIDTH] if not images_dims is None else None
+            img_height = images_dims.loc[item][VFields.HEIGHT] if not images_dims is None else None
             bbox = transform_coordinates(
                 record[VFields.BBOX],
                 input_format=CoordinatesFormat.x_y_width_height,
@@ -573,7 +571,7 @@ class ImageDatasetMD(ImageDataset):
             detections.append(det)
         id = (
             os.path.relpath(rows_item.iloc[0][VFields.ITEM], form_id_with_filename_without_prefix)
-            if form_id_with_filename_without_prefix is not None
+            if not form_id_with_filename_without_prefix is None
             else rows_item.iloc[0][VFields.FILE_ID]
         )
         results.append({

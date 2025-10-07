@@ -9,7 +9,7 @@ from .env import ENV, ENVS
 __all__ = ['get_logger']
 
 LOGGING_PATH = os.environ.get('LOGGING_PATH')
-if LOGGING_PATH is not None:
+if not LOGGING_PATH is None:
     if os.path.isdir(LOGGING_PATH):
         FILENAME = "ml.log"
         PATH = os.path.join(LOGGING_PATH, FILENAME)
@@ -25,7 +25,7 @@ else:
     PATH = os.path.join(foldername, FILENAME)
 
 FORMAT = "%(asctime)s [%(name)-12s] [%(levelname)-5.5s]  %(message)s"
-if os.environ.get('LOGGING_LEVEL', None) is not None:
+if not os.environ.get('LOGGING_LEVEL', None) is None:
     DEFAULT_LEVEL = logging._nameToLevel[os.environ['LOGGING_LEVEL']]
 else:
     if ENV == ENVS.Prod:
