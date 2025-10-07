@@ -5,10 +5,10 @@ from collections import defaultdict
 from multiprocessing import Manager
 import os
 import pandas as pd
-from typing import Union, Final, List, Tuple
+from typing import Union, List, Tuple
 
-from ml_base.model import Model
-from ml_base.eval import Metric
+from ml_base.model import IModel
+from ml_base.eval import Metric, Evaluator
 from ml_base.utils.misc import parallel_exec, delete_dirs, get_temp_folder
 from ml_base.utils.dataset import get_random_id
 from ml_base.utils.logger import get_logger
@@ -27,7 +27,7 @@ from PytorchWildlife.models import detection as pw_detection
 logger = get_logger(__name__)
 
 
-class MegadetectorV6(Model):
+class MegadetectorV6(IModel):
 
     CLASS_NAMES = {
         0: MD_LABELS.ANIMAL,
@@ -86,7 +86,8 @@ class MegadetectorV6(Model):
                 freq_video_sampling: int = 5,
                 frames_folder: str = None,
                 delete_frames_folder_on_finish: bool = True,
-                move_files_to_temp_folder: bool = True) -> VisionDataset:
+                move_files_to_temp_folder: bool = True,
+                temp_folder_to_move_files: str = None) -> VisionDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -106,7 +107,8 @@ class MegadetectorV6(Model):
             model=self,
             dataset=dataset.images_ds,
             threshold=threshold,
-            move_files_to_temp_folder=move_files_to_temp_folder)
+            move_files_to_temp_folder=move_files_to_temp_folder,
+            temp_folder_to_move_files=temp_folder_to_move_files)
         dets_vids_ds = MegadetectorV6Video.predict(
             model=self,
             dataset=dataset.videos_ds,
@@ -114,7 +116,8 @@ class MegadetectorV6(Model):
             freq_video_sampling=freq_video_sampling,
             frames_folder=frames_folder,
             delete_frames_folder_on_finish=delete_frames_folder_on_finish,
-            move_files_to_temp_folder=move_files_to_temp_folder)
+            move_files_to_temp_folder=move_files_to_temp_folder,
+            temp_folder_to_move_files=temp_folder_to_move_files)
 
         return type(dataset).from_datasets(dets_imgs_ds, dets_vids_ds)
 
@@ -125,14 +128,20 @@ class MegadetectorV6(Model):
                  frames_folder: str = None,
                  return_detections: bool = False,
                  delete_frames_folder_on_finish: bool = True,
-                 move_files_to_temp_folder: bool = True
-                 ) -> Union[VisionDataset, Tuple[VisionDataset, VisionDataset]]:
-        dets_ds = self.predict(
-            dataset=dataset,
-            freq_video_sampling=freq_video_sampling,
-            frames_folder=frames_folder,
-            delete_frames_folder_on_finish=delete_frames_folder_on_finish,
-            move_files_to_temp_folder=move_files_to_temp_folder)
+                 move_files_to_temp_folder: bool = True,
+                 dets_csv: str = None) -> Union[VisionDataset, Tuple[VisionDataset, VisionDataset]]:
+        if not dets_csv is None and os.path.isfile(dets_csv):
+            dets_ds = type(dataset).from_csv(dets_csv, root_dir=dataset.root_dir)
+        else:
+            dets_ds = self.predict(
+                dataset=dataset,
+                freq_video_sampling=freq_video_sampling,
+                frames_folder=frames_folder,
+                delete_frames_folder_on_finish=delete_frames_folder_on_finish,
+                move_files_to_temp_folder=move_files_to_temp_folder)
+            if not dets_csv is None:
+                logger.info(f"Detections results stored in {dets_csv}")
+                dets_ds.to_csv(dets_csv)
 
         classif_ds = self.classify_dataset_using_detections(
             dataset=dataset,
@@ -149,16 +158,14 @@ class MegadetectorV6(Model):
                  metrics: List[Metric],
                  dets_threshold: float,
                  dataset_pred: VisionDataset = None,
-                 verbose: bool = False,
-                 return_dict: bool = False) -> Union[list, dict]:
+                 verbose: bool = False) -> Evaluator:
         if dataset_pred is None:
             dataset_pred = self.classify(dataset=dataset_true, dets_threshold=dets_threshold)
 
         return super().evaluate(dataset_true=dataset_true,
                                 metrics=metrics,
                                 dataset_pred=dataset_pred,
-                                verbose=verbose,
-                                return_dict=return_dict)
+                                verbose=verbose)
 
     def train(self,
               dataset,

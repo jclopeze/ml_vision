@@ -26,6 +26,18 @@ __all__ = ['seek_files', 'read_labelmap_file', 'write_labelmap_file', 'fix_categ
            'set_field_types_in_data', 'get_media_name_with_prefix', 'get_random_id',
            'get_sorted_df', 'get_default_fields']
 
+class Fields():
+    ITEM = 'item'
+    LABEL = 'label'
+    PARTITION = 'partition'
+    ID = 'id'
+    FILE_NAME = "file_name"
+    DATE_CAPTURED = "date_captured"
+    LOCATION = "location"
+    FILE_ID = "file_id"
+    SCORE = "score"
+
+
 def seek_files(path: str,
                seek_name: str = None,
                seek_extension: str = None,
@@ -55,16 +67,16 @@ def seek_files(path: str,
     """
     paths = []
 
-    assert_cond = seek_name is not None or seek_extension is not None
+    assert_cond = not seek_name is None or not seek_extension is None
     assert assert_cond, "You must provide at least one of seek_name and seek_extension"
 
-    if seek_extension is not None:
+    if not seek_extension is None:
         seek_extension = seek_extension if isinstance(seek_extension, list) else [seek_extension]
         seek_extension = [*map(lambda x: re.sub("[.]*", "", x, count=1), seek_extension)]
     else:
         seek_extension = [r'\w*']
 
-    if seek_name is not None:
+    if not seek_name is None:
         seek_name = seek_name if isinstance(seek_name, list) else [seek_name]
     else:
         seek_name = ['.*']
@@ -184,7 +196,7 @@ def fix_category_mapping(category_mapping: dict) -> dict:
 def get_cleaned_label(value: str) -> str:
     if value is np.nan:
         return ""
-    return " ".join(value.lower().strip().split())
+    return " ".join(str(value).lower().strip().split())
 
 
 def get_cats_from_source(categories: Union[Iterable, str, None],
@@ -235,7 +247,7 @@ def get_cats_from_source(categories: Union[Iterable, str, None],
 def sample_data(data: pd.DataFrame,
                 n: Union[str, int, float, dict],
                 random_state: int = None,
-                groupby: str = 'label'):
+                groupby: str = Fields.LABEL):
     """Function that samples the elements of a DataFrame by grouping them by field(s) `groupby` and
     taking a random number determined by the value of `n`.
 
@@ -259,7 +271,7 @@ def sample_data(data: pd.DataFrame,
     groupby : list of str, str or None, optional
         Field(s) of `data` by which the data will be grouped for sampling.
         If None, no grouping will be done and sampling will be performed for all `data`.
-        By default 'label'
+        By default `Fields.LABEL`
     Returns
     -------
     pd.DataFrame
@@ -286,11 +298,11 @@ def sample_data(data: pd.DataFrame,
         return x
 
     # Rudimentary way to avoid grouping by any field
-    if groupby is None or (groupby == 'label' and Fields.LABEL not in data):
+    if groupby is None or (groupby == Fields.LABEL and Fields.LABEL not in data):
         data['dummy_col'] = 'dummy_val'
         groupby = 'dummy_col'
 
-    if random_state is not None:
+    if not random_state is None:
         data = data.sort_values(Fields.ID)
 
     if type(n) is float and n < 1.:
@@ -449,7 +461,7 @@ def get_abspath_and_validate_item(item,
         not present
 
     """
-    if new_root_dir is not None and not item.startswith(new_root_dir):
+    if not new_root_dir is None and not item.startswith(new_root_dir):
         if old_root_dir:
             _item = os.path.relpath(item, old_root_dir)
         else:
@@ -460,12 +472,12 @@ def get_abspath_and_validate_item(item,
 
     if validate_filenames and not os.path.isfile(new_item):
         if not_exist_ok:
-            if invalid_items is not None:
+            if not invalid_items is None:
                 invalid_items.append(new_item)
         else:
             raise ValueError(f"Item not found in file system: {new_item}")
 
-    if items_to_abspaths is not None:
+    if not items_to_abspaths is None:
         items_to_abspaths[item] = new_item
 
     return new_item
@@ -561,7 +573,7 @@ def get_sorted_df(df: pd.DataFrame,
         else:
             sort_by = sort_by + [Fields.SCORE]
             sort_asc = sort_asc + [False]
-    if sort_by is not None:
+    if not sort_by is None:
         if not is_array_like(sort_by):
             sort_by = [sort_by]
         if all(x in df.columns for x in sort_by):
@@ -585,15 +597,3 @@ def get_default_fields(class_) -> list:
     fields = [getattr(class_, x) for x in dir(class_)
               if not x.startswith('_') and x not in ('TYPES', 'NAMES')]
     return fields
-
-
-class Fields():
-    ITEM = 'item'
-    LABEL = 'label'
-    PARTITION = 'partition'
-    ID = 'id'
-    FILE_NAME = "file_name"
-    DATE_CAPTURED = "date_captured"
-    LOCATION = "location"
-    FILE_ID = "file_id"
-    SCORE = "score"

@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from math import floor, ceil
+import numpy as np
 from typing import Optional, Union, Iterable, Tuple
 from functools import partial
 
@@ -72,6 +73,14 @@ def get_coordinates_type_from_coords(coord1, coord2, coord3, coord4) -> Coordina
     return CoordinatesType.absolute
 
 
+def get_coordinates_type_from_bbox(bbox: str) -> CoordinatesType:
+    if bbox is np.nan or not bbox:
+        return CoordinatesType.invalid
+    coords = [float(x) for x in bbox.split(',')]
+    assert len(coords) == 4, f"Badly formatted bbox: {bbox}"
+    return get_coordinates_type_from_coords(*coords)
+
+
 def transform_coordinates(bbox: Union[str, Iterable],
                           *,
                           input_format: CoordinatesFormat = CoordinatesFormat.x_y_width_height,
@@ -112,7 +121,7 @@ def transform_coordinates(bbox: Union[str, Iterable],
         Coordinates resulting from the conversion, given in the format and type of coordinates and
         in the type of data requested
     """
-    if media_width is not None and media_height is not None:
+    if not media_width is None and not media_height is None:
         media_width = float(media_width)
         media_height = float(media_height)
     if type(bbox) == str:
@@ -167,7 +176,7 @@ def transform_coordinates(bbox: Union[str, Iterable],
     else:
         raise ValueError("Invalid input output coordinates format.")
 
-    if round_digits is not None:
+    if not round_digits is None:
         coord1, coord2, coord3, coord4 = [round(c, round_digits)
                                           for c in [coord1, coord2, coord3, coord4]]
 

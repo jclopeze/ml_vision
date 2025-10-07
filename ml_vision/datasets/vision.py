@@ -32,7 +32,7 @@ from ml_vision.utils.coords import CoordinatesType
 from ml_vision.utils.coords import CoordinatesFormat
 from ml_vision.utils.coords import transform_coordinates_to_absolute_str
 from ml_vision.utils.coords import transform_coordinates
-from ml_vision.utils.coords import get_coordinates_type_from_coords
+from ml_vision.utils.coords import get_coordinates_type_from_bbox
 from ml_vision.utils.image import set_image_dims
 from ml_vision.utils.image import draw_detections_of_image
 from ml_vision.utils.image import crop_bboxes_on_image
@@ -456,8 +456,7 @@ class VisionDataset(Dataset):
         if self.is_empty:
             return None
         bbox = self.take(1)[VFields.BBOX].iloc[0]
-        [coord1, coord2, coord3, coord4] = [float(x) for x in bbox.split(',')]
-        return get_coordinates_type_from_coords(coord1, coord2, coord3, coord4)
+        return get_coordinates_type_from_bbox(bbox=bbox)
     #   endregion
 
     # endregion
@@ -566,7 +565,7 @@ class ImageDataset(VisionDataset):
 
             crop_item = f"{record[VFields.ID]}{ImageDataset.DEFAULT_EXT}"
             crop_path = os.path.join(dest_path, crop_item)
-            if prefix_field is not None:
+            if not prefix_field is None:
                 crop_path = get_media_name_with_prefix(record, prefix_field, '_', crop_path)
             if crops_exist is None:
                 crops_exist = os.path.isfile(crop_path)
@@ -605,14 +604,13 @@ class ImageDataset(VisionDataset):
             force_creation=force_crops_creation)
 
         bboxes_coords_inside_crops = dict(bboxes_coords_inside_crops)
-        crops_dims_df = pd.DataFrame(data=crops_dims.values(),
-                                     index=crops_dims.keys()).reset_index(names=VFields.ITEM)
         crops_ds = ImageDataset._copy_dataset(dataset)
         crops_ds[VFields.ITEM] = lambda rec: id_to_new_item[rec[VFields.ID]]
-        file_id_mapper = dataset._add_file_id_field_to_dataframe(crops_ds[[VFields.ITEM]])
+        file_id_mapper = dataset._add_file_id_field_to_dataframe(crops_ds.df[[VFields.ITEM]])
         crops_ds[VFields.PARENT_FILE_ID] = lambda rec: id_to_parent_file_id[rec[VFields.ID]]
         crops_ds[VFields.BBOX] = lambda rec: bboxes_coords_inside_crops[rec[VFields.ITEM]]
-        crops_ds[[VFields.WIDTH, VFields.HEIGHT]] = crops_dims_df
+        crops_ds[VFields.WIDTH] = lambda rec: crops_dims[rec[VFields.ITEM]]['width']
+        crops_ds[VFields.HEIGHT] = lambda rec: crops_dims[rec[VFields.ITEM]]['height']
         crops_ds[VFields.ID] = lambda _: get_random_id()
         crops_ds[VFields.FILE_ID] = file_id_mapper
         crops_ds[VFields.FILE_TYPE] = ImageDataset.FILE_TYPE
@@ -911,16 +909,16 @@ class VideoDataset(VisionDataset):
 
         logger.info(f"Creating videos from frames and storing them in the path: {dest_folder}")
 
-        if original_vids_ds is not None:
+        if not original_vids_ds is None:
             original_vids_df = original_vids_ds.df
             original_vids_dir = original_vids_ds.root_dir
 
         df = frames_ds.df
 
         def get_vid_file(vid_id):
-            if original_vids_ds is not None:
+            if not original_vids_ds is None:
                 vid_rec = original_vids_df[original_vids_df[VFields.FILE_ID] == vid_id].iloc[0]
-                if original_vids_dir is not None:
+                if not original_vids_dir is None:
                     fname = os.path.relpath(vid_rec[VFields.ITEM], original_vids_dir)
                 else:
                     fname = vid_rec[VFields.ITEM]
@@ -1014,12 +1012,12 @@ class VideoDataset(VisionDataset):
 
         frame_numbers_fn = None
         time_positions_fn = None
-        if frame_numbers is not None:
+        if not frame_numbers is None:
             def frame_numbers_fn(record):
                 return frame_numbers.get(record[VFields.ITEM], [])
             logger.info(f"Converting {len(videos_ds.items)} videos to frames, "
                         f"given frame numbers for each video.")
-        elif time_positions is not None:
+        elif not time_positions is None:
             def time_positions_fn(record):
                 return time_positions.get(record[VFields.ITEM], [])
             logger.info(f"Converting {len(videos_ds.items)} videos to frames, "
@@ -1260,9 +1258,9 @@ class VideoDataset(VisionDataset):
             where the first element is the list with the paths of the created images and the other two
             are video properties
         """
-        assert_cond = (bool(freq_sampling is not None)
-                       + bool(frame_numbers is not None)
-                       + bool(time_positions is not None)) == 1
+        assert_cond = (bool(not freq_sampling is None)
+                       + bool(not frame_numbers is None)
+                       + bool(not time_positions is None)) == 1
         assert_msg = (f"You must specify ONLY one of the parameters (freq_sampling, "
                       f"frame_numbers, time_positions)")
         assert assert_cond, assert_msg
@@ -1296,7 +1294,7 @@ class VideoDataset(VisionDataset):
         frame_filenames = []
         frame_nums_video = []
 
-        if time_positions is not None:
+        if not time_positions is None:
             frame_numbers = {round(time_pos * fps) + 1: time_pos for time_pos in time_positions}
 
         # frame_idx is always 0-base
@@ -1332,7 +1330,7 @@ class VideoDataset(VisionDataset):
 
         vidcap.release()
 
-        if videos_data is not None:
+        if not videos_data is None:
             videos_data[input_video_file] = {
                 'frames_filenames': frame_filenames,
                 'frames_num_video': frame_nums_video,
@@ -1370,7 +1368,7 @@ class VideoDataset(VisionDataset):
     @staticmethod
     def get_frame_path(frame_number: int, frames_folder: str = None):
         frame_fname = 'frame{:05d}.jpg'.format(frame_number)
-        if frames_folder is not None:
+        if not frames_folder is None:
             return os.path.join(frames_folder, frame_fname)
         return frame_fname
 

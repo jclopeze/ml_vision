@@ -210,7 +210,7 @@ class GradientSolver():
             move = generate_cosine_move(
                 self.problem, solution.index, self.p, expanded_set, intensify)
             intensify = True
-            if move is not None:
+            if not move is None:
                 solution = Solution(calculate_cost(self.problem, move, self.p), move)
                 expanded_set.add(index_to_str(solution.index))
                 if solution.cost < self.incumbent.cost:

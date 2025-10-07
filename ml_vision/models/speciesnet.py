@@ -9,7 +9,7 @@ import pandas as pd
 import subprocess
 from typing import Final
 
-from ml_base.model import Model
+from ml_base.model import IModel
 from ml_base.utils.misc import get_temp_folder
 from ml_base.utils.misc import parallel_exec, delete_dirs
 from ml_base.utils.logger import get_logger
@@ -26,7 +26,7 @@ from ml_vision.utils.vision import VisionFields as VFields
 logger = get_logger(__name__)
 
 
-class SpeciesNet(Model):
+class SpeciesNet(IModel):
 
     DEFAULT_SCRIPT: Final = 'speciesnet.scripts.run_model'
 
@@ -59,7 +59,7 @@ class SpeciesNet(Model):
                    '--predictions_json', classifs_json,
                    '--detections_json',  dets_json,
                    ]
-            if country is not None:
+            if not country is None:
                 cmd += ['--country', f'{country}']
             logger.debug(f"Running SpeciesNet classifier with the command: {' '.join(cmd)}")
 
@@ -77,7 +77,7 @@ class SpeciesNet(Model):
                    '--detections_json',  dets_json,
                    '--classifications_json', classifs_json
                    ]
-            if country is not None:
+            if not country is None:
                 cmd += ['--country', f'{country}']
             logger.debug(f"Running SpeciesNet ensemble with the command: {' '.join(cmd)}")
 
@@ -91,7 +91,7 @@ class SpeciesNet(Model):
                    '--folders', dataset.root_dir,
                    '--predictions_json', ensemble_json,
                    ]
-            if country is not None:
+            if not country is None:
                 cmd += ['--country', f'{country}']
             logger.debug(f"Running SpeciesNet with the command: {' '.join(cmd)}")
 
@@ -108,7 +108,8 @@ class SpeciesNet(Model):
                 threshold: float = 0.01,
                 frames_folder: str = None,
                 delete_frames_folder_on_finish: bool = True,
-                move_files_to_temp_folder: bool = True) -> VisionDataset:
+                move_files_to_temp_folder: bool = True,
+                batch_size_video_proc: int = None) -> VisionDataset:
         """Method that performs the prediction of the Megadetector on the images in `dataset`
 
         Parameters
@@ -138,7 +139,8 @@ class SpeciesNet(Model):
             threshold=threshold,
             frames_folder=frames_folder,
             delete_frames_folder_on_finish=delete_frames_folder_on_finish,
-            move_files_to_temp_folder=move_files_to_temp_folder)
+            move_files_to_temp_folder=move_files_to_temp_folder,
+            batch_size=batch_size_video_proc)
 
         return type(dataset).from_datasets(classifs_imgs_ds, classifs_vids_ds)
 
@@ -148,7 +150,8 @@ class SpeciesNet(Model):
                  threshold: float = 0.01,
                  frames_folder: str = None,
                  delete_frames_folder_on_finish: bool = True,
-                 move_files_to_temp_folder: bool = True):
+                 move_files_to_temp_folder: bool = True,
+                 batch_size_video_proc: int = None):
 
         classifs_ds = self.predict(
             dataset=dataset,
@@ -156,7 +159,8 @@ class SpeciesNet(Model):
             threshold=threshold,
             frames_folder=frames_folder,
             delete_frames_folder_on_finish=delete_frames_folder_on_finish,
-            move_files_to_temp_folder=move_files_to_temp_folder)
+            move_files_to_temp_folder=move_files_to_temp_folder,
+            batch_size_video_proc=batch_size_video_proc)
 
         classif_ds = self.taxonomic_classification(dataset=dataset, classifications=classifs_ds)
 
